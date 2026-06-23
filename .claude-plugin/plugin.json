@@ -1,0 +1,10 @@
+{
+  "name": "gaslighter",
+  "version": "0.2.2",
+  "description": "Automated reconsideration nudges for multi-turn conversations — disabled by default, opt-in via GASLIGHTER_DEFAULT_MODE. Best for implicit requirements and long sessions.",
+  "author": {
+    "name": "LarryGF",
+    "url": "https://github.com/LarryGF"
+  },
+  "hooks": "./hooks/gaslighter-hooks.json"
+}
