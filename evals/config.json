@@ -1,7 +1,7 @@
 {
   "defaults": {
-    "runs": 1,
-    "models": ["haiku"],
+    "runs": 3,
+    "models": ["haiku", "sonnet"],
     "arms": ["baseline", "gaslighter", "nudge-prompt"],
     "workers": 4,
     "timeout": 300
