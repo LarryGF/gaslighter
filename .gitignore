@@ -14,3 +14,6 @@ venv/
 
 # Node
 node_modules/
+
+# Runtime state
+.claude/scheduled_tasks.lock

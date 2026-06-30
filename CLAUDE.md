@@ -26,27 +26,6 @@ When Claude uses Write or Edit tools, the Stop hook fires a short psychologicall
 node tests/test-nudge-decision.js
 ```
 
-## Running evals
-
-```bash
-cd evals
-
-# Validate scorers (no API spend)
-python3 run.py --selftest
-
-# Quick run
-python3 run.py --task hard-buried-constraints --models haiku --runs 1
-
-# Full run with config defaults
-python3 run.py --all --runs 4
-
-# Exclude specific tasks
-python3 run.py --all --exclude-task hard-preserve-behavior
-
-# Custom config
-python3 run.py --config config-thorough.json --all
-```
-
 ## Key conventions
 
 - Hook paths use `${CLAUDE_PLUGIN_ROOT}`, never `CLAUDE_SKILL_DIR`
