@@ -1,7 +1,19 @@
 ---
 name: gaslighter
-description: "Requirement completeness checker — nudges you to re-read the original request before finishing"
-model: sonnet
+description: "Requirement completeness checker — nudges you to re-read the original request before finishing. Routes to eval and judge sub-skills."
+when_to_use: "Use when user says 'gaslighter', 'eval', 'evals', 'run evals', 'benchmark', 'judge', 'score', 'rate', or invokes /gaslighter directly."
+model: haiku
+allowed-tools:
+  - Skill(gaslighter:eval)
+  - Skill(gaslighter:judge)
+  - AskUserQuestion()
+  - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/load.py *)
+---
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/load.py" $ARGUMENTS`
+
+Execute the instructions above.
+
 ---
 
 # Gaslighter — Requirement Completeness Guard
