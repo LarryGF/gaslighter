@@ -100,17 +100,53 @@ Gaslighter governs **completeness** (were stated requirements implemented?), not
 
 ## Status
 
-**Current version**: 0.2.0 (2026-06-23)
+**Current version**: 0.2.0 (2026-06-29)
 
-**v0.1.0 eval results**: Underperformed baseline (78.5-96.5% vs 94-100%) on single-turn tasks. See `docs/eval-findings-2026-06-23.md` and `docs/root-cause-analysis-2026-06-23.md` for detailed analysis.
+### Eval history
 
-**v0.2.0 changes**: 
-- Recalibrated thresholds (AND logic instead of OR for full mode)
-- Rewrote all nudge prompts (numbered checklists, "re-read requirements first")
-- Added early termination detection
-- See `docs/v0.2.0-implementation.md` for implementation notes
+**v0.1.0** — Underperformed baseline (78.5–96.5% vs 94–100%) on single-turn explicit-checklist tasks. Root cause: tasks were too easy — models went item-by-item and rarely missed anything, so the nudge had nothing to catch.
 
-**Validation needed**: Run evals to confirm improvements. See CLAUDE.md for detailed eval workflow.
+**v0.2.0** — Recalibrated thresholds (AND logic for full mode), rewrote nudge prompts, added early termination detection. Rewrote eval tasks to target five specific failure modes where models actually drop requirements:
+
+| Task | Failure mode | What it tests |
+|------|-------------|---------------|
+| `hard-buried-constraints` | Requirements buried in prose | Did the model read the entire prompt? |
+| `hard-implicit-patterns` | Conventions in seed code, not stated in prompt | Did the model look at existing code? |
+| `hard-cascade-update` | One change implies updates to 6 dependent files | Did the model trace dependencies? |
+| `hard-preserve-behavior` | Fix a bug without "improving" intentional design | Did the model resist unnecessary cleanup? |
+| `hard-trailing-reqs` | Requirements appended after the main ask | Did the model read to the end? |
+
+### Results (n=5, 2026-06-29)
+
+Complete rate by arm (mean of 5 runs). Bold = best arm for that task.
+
+**Haiku**
+
+| Task | Baseline | Gaslighter | Nudge-prompt |
+|------|----------|------------|--------------|
+| buried-constraints | **1.00** | 0.98 | **1.00** |
+| cascade-update | 0.78 | **0.88** | 0.27 |
+| implicit-patterns | **1.00** | **1.00** | **1.00** |
+| preserve-behavior | **1.00** | **1.00** | **1.00** |
+| trailing-reqs | **1.00** | **1.00** | 0.80 |
+
+**Sonnet**
+
+| Task | Baseline | Gaslighter | Nudge-prompt |
+|------|----------|------------|--------------|
+| buried-constraints | 0.88 | **0.90** | **0.90** |
+| cascade-update | **0.90** | 0.78 | 0.75 |
+| implicit-patterns | **1.00** | **1.00** | **1.00** |
+| preserve-behavior | **1.00** | **1.00** | **1.00** |
+| trailing-reqs | 0.20 | 0.00 | 0.00 |
+
+**Key findings:**
+
+- **Haiku + cascade-update**: Gaslighter's strongest win — 0.88 vs 0.78 baseline, 0.27 nudge-prompt. The hook caught missed dependency updates that static nudging didn't.
+- **Haiku + trailing-reqs**: Nudge-prompt regressed (0.80) while baseline and gaslighter held at 1.0.
+- **Sonnet + trailing-reqs**: All arms scored near zero — this was a **harness bug**, not a task difficulty finding. Sonnet hallucinated "the file already exists" in empty workspaces (14/15 runs wrote no files). Fixed by adding a seed file.
+- **Sonnet + cascade-update**: Gaslighter slightly underperformed baseline. One run scored 0.0 during eval but rescores as 0.88 — likely a scorer race condition under parallel I/O. Fixed with `os.sync()` before scoring.
+- **3 of 5 tasks showed no differentiation** (all arms ~1.0) on both models — these tasks may be too easy or need harder variants.
 
 ## Eval Suite
 
@@ -120,60 +156,52 @@ cd evals
 # Validate all scorers (no API spend)
 python run.py --selftest
 
-# Recommended: run on both haiku and sonnet
-python run.py --task hard-* --models haiku,sonnet --runs 4
+# Single task, quick check
+python run.py --task hard-buried-constraints --models haiku --runs 1
 
-# Pilot: 5 tasks × 3 arms × 4 runs
-python run.py --pilot --runs 4
+# Full run: 5 tasks × 3 arms × 4 runs
+python run.py --all --runs 4
+
+# Multi-model
+python run.py --all --models haiku,sonnet --runs 4
+
+# Exclude a task
+python run.py --all --exclude-task hard-preserve-behavior
 
 # Rescore from kept workspaces
 python run.py --rescore runs/<stamp>
 ```
 
-For systematic analysis of eval results, see the "Quick Start — Validate v0.2.0 Improvements" section in CLAUDE.md.
-
 ### Arms
 
-- **baseline** — no plugin, no extra prompts
-- **gaslighter** — plugin loaded via `--plugin-dir`
-- **nudge-prompt** — static system prompt with nudge text (control: does a dynamic hook outperform a static instruction?)
+| Arm | What it does |
+|-----|-------------|
+| **baseline** | No plugin, no extra prompts |
+| **gaslighter** | Plugin loaded via `--plugin-dir` |
+| **nudge-prompt** | Static system prompt with nudge text (control: does a dynamic hook outperform a static instruction?) |
 
-### Primary metric
+### Metrics
 
-`complete_rate` — fraction of stated requirements implemented (deterministic, per-requirement scoring).
+| Metric | Source | Meaning |
+|--------|--------|---------|
+| `complete_rate` | Deterministic scorer (string match + AST) | Fraction of scored requirements found in workspace files |
+| `correct` | `1 if complete_rate >= 0.75 else 0` | Binary pass/fail threshold on complete_rate |
+| `LOC` | `code_stats()` | Non-blank non-comment source lines (excludes tests) |
+| `turns` | Claude CLI metadata | Number of model turns in the session |
+| `cost` | Claude CLI metadata | API cost per session in USD |
 
-## Testing the Judge Skill
+### LLM Judge
 
-The judge skill allows LLM-based evaluation of completeness and overcorrection without direct API calls. Instead of using `judge.py`, you can run judging inside a Claude Code session with the plugin loaded.
-
-### Load plugin in a test session
+For subjective evaluation (completeness and overcorrection ratings), use the judge skill in a Claude Code session with the plugin loaded:
 
 ```bash
 claude --plugin-dir /path/to/gaslighter
 ```
 
-### Run pilot evals to generate workspaces
-
-```bash
-cd evals
-python run.py --pilot --runs 2
-# outputs to runs/<timestamp>/
-```
-
-### Invoke the judge skill
-
-In the Claude Code session with the plugin loaded:
+Then invoke:
 
 ```
 /gaslighter:judge runs/<timestamp>
 ```
 
-This will:
-1. Read task prompts from `evals/tasks.py`
-2. For each workspace, judge completeness (0-3) and overcorrection (0-3)
-3. Write `judge.json` to the run directory
-4. Display aggregate statistics by arm
-
-### Compare to direct API approach
-
-The skill produces the same output format as `python judge.py --run runs/<timestamp>` but runs within the Claude session instead of making direct API calls.
+This collects workspace data via `judge.py --collect`, then the session model rates each workspace on completeness (0–3) and overcorrection (0–3). Results are written to `runs/<timestamp>/judge.json`. No direct API calls — the session model is the judge.
