@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.0.0] - 2026-06-29
+
+### Summary
+
+Simplification rewrite. The v0.2.x codebase (~750 lines of hook code across 8 files) performed worse than baseline in evals. Replaced with ~100 lines across 3 files using psychologically effective nudge wording instead of procedural checklists.
+
+### Changed
+
+- **Nudge approach**: Replaced 5 context-specific checklist nudges with 2 short psychological prompts ("are you absolutely sure?"). First nudge forces re-examination; subsequent nudges include escape hatch.
+- **Threshold logic**: Simplified from mode-based matrix (lite/full/ultra × files/tools/tasks) to single check: did the model use Write or Edit tools?
+- **Anti-loop guard**: Simplified from 7 state fields to 3 (`nudge_count`, `turn_count`, `last_nudge_turn`). Max 1 nudge per turn, max 3 per session.
+- **Always blocking**: Removed lite/full/ultra distinction. One mode that works (exit code 2).
+- **SessionStart**: Emits short framing prompt instead of full SKILL.md content.
+
+### Removed
+
+- `gaslighter-config.js` — inlined into nudge.js
+- `gaslighter-runtime.js` — inlined into nudge.js
+- `gaslighter-instructions.js` — inlined into activate.js
+- `gaslighter-mode-tracker.js` — no more per-prompt mode tracking
+- `gaslighter-precompact.js` — YAGNI (model preserves goals during compaction)
+- `gaslighter-config-optionA.js` / `gaslighter-config-optionB.js` — dead A/B test code
+- LLM judge (agent-based second nudge) — replaced by escape hatch in nudge text
+- `UserPromptSubmit` and `PreCompact` hooks — removed from hooks.json
+- `skills/data-enricher/` — not part of core plugin
+- `scripts/enrich.py` — not part of core plugin
+- `AUTONOMOUS-IMPROVEMENT.md` — process doc
+- `docs/archive/` — 6 historical analysis files
+- `docs/STATUS.md`, `docs/v0.2.1-*.md`, `docs/v0.2.2-*.md` — obsoleted
+- `tests/test-llm-judge.js` — no more LLM judge
+
+### Added
+
+- `evals/config.json` — persistent eval defaults (runs, models, arms, workers, timeout)
+- `--config`, `--timeout`, `--exclude-task` flags in `evals/run.py`
+
+### File count
+
+~15 files (down from ~35). Hook code: ~100 lines (down from ~750).
+
+---
+
 ## [0.2.0] - 2026-06-23
 
 ### Summary
