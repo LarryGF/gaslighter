@@ -1,7 +1,7 @@
 {
   "name": "gaslighter",
-  "version": "0.2.2",
-  "description": "Automated reconsideration nudges for multi-turn conversations — disabled by default, opt-in via GASLIGHTER_DEFAULT_MODE. Best for implicit requirements and long sessions.",
+  "version": "1.0.0",
+  "description": "Requirement completeness checker — nudges Claude to re-read the original request before finishing code changes.",
   "author": {
     "name": "LarryGF",
     "url": "https://github.com/LarryGF"

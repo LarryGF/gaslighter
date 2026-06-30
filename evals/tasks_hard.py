@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Harder task definitions for gaslighter eval.
+"""Hard task definitions for gaslighter eval.
 
-Tasks designed to catch requirements that need verification:
-- Assumptions about existing structure
-- Cross-file integration
-- Architectural constraints
-- Implicit patterns from context
+Tasks target specific failure modes where requirements are easy to miss:
+- Buried constraints in prose
+- Implicit patterns from seed code
+- Cross-file cascade updates
+- Preservation of intentional design
+- Trailing requirements after main ask
 """
 import ast
-import json
 import re
 
 
@@ -36,951 +36,842 @@ def _source(code_path):
         return ""
 
 
-# =============================================================================
-# Task 1: Plugin skill with existing patterns
-# Requirements:
-#   1. Frontmatter args must match actual argument parsing in body
-#   2. Must delegate complex logic to scripts/ not inline
-#   3. Must verify referenced directories exist before using
-#   4. Must follow naming convention from existing skills
-#   5. Must include error handling for missing dependencies
-#   6. Must document assumptions in comments
-# =============================================================================
-TASK_PLUGIN_SKILL_SEED = {
-    "skills/existing-skill/SKILL.md": '''---
-name: existing-skill
-description: Example existing skill
-args:
-  path: Path to process
-trigger: auto
-model: haiku
----
-
-# Instructions
-
-Read the file at `{path}` and process it.
-
-Delegate processing to `scripts/process.py`.
-''',
-    "scripts/process.py": '''#!/usr/bin/env python3
-import sys
-print(f"Processing: {sys.argv[1]}")
-''',
-}
-
-TASK_PLUGIN_SKILL_PROMPT = (
-    "Create a new skill at skills/data-enricher/SKILL.md that:\n"
-    "1. Accepts a 'session_path' argument in frontmatter\n"
-    "2. Reads session data from {session_path}/metadata.json\n"
-    "3. Delegates enrichment to scripts/enrich.py (pass session_path as arg)\n"
-    "4. Verifies {session_path} directory exists before processing\n"
-    "5. Handles FileNotFoundError if metadata.json is missing\n"
-    "6. Follows the same frontmatter structure as skills/existing-skill/SKILL.md\n"
-    "7. Documents the assumption that metadata.json contains 'tags' field\n"
-    "8. Creates scripts/enrich.py that reads the JSON and prints enriched tags\n"
-)
-
-TASK_PLUGIN_SKILL_GOOD = {
-    "skills/data-enricher/SKILL.md": '''---
-name: data-enricher
-description: Enrich session metadata
-args:
-  session_path: Path to session directory
-trigger: manual
-model: haiku
----
-
-# Instructions
-
-Process session at `{session_path}`:
-
-1. Verify directory exists
-2. Read metadata.json (handle missing file)
-3. Delegate to scripts/enrich.py
-
-Assumption: metadata.json contains 'tags' array.
-''',
-    "scripts/enrich.py": '''#!/usr/bin/env python3
-import json
-import sys
-from pathlib import Path
-
-session_path = Path(sys.argv[1])
-meta_file = session_path / "metadata.json"
-
-if not meta_file.exists():
-    print(f"Error: {meta_file} not found", file=sys.stderr)
-    sys.exit(1)
-
-data = json.loads(meta_file.read_text())
-tags = data.get("tags", [])
-print(f"Enriched tags: {tags}")
-''',
-}
-
-TASK_PLUGIN_SKILL_BAD = {
-    "skills/data-enricher/SKILL.md": '''---
-name: data-enricher
-description: Enrich session metadata
-args:
-  path: Path to session directory
----
-
-# Instructions
-
-Read {path}/metadata.json and enrich the tags field.
-
-Parse the JSON inline:
-```python
-import json
-data = json.loads(open(f"{path}/metadata.json").read())
-tags = data["tags"]
-```
-''',
-    # Missing scripts/enrich.py, wrong arg name, inline logic, no error handling
-}
-
-
-def score_plugin_skill(workdir):
-    skill = workdir / "skills" / "data-enricher" / "SKILL.md"
-    script = workdir / "scripts" / "enrich.py"
-
-    if not skill.exists():
-        return {"correct": 0, "complete_rate": 0.0, "reason": "SKILL.md missing"}
-
-    skill_content = _source(skill)
-    script_content = _source(script) if script.exists() else ""
-
-    reqs = {
-        "correct_arg_name": "session_path:" in skill_content or "session_path :" in skill_content,
-        "delegates_to_script": "scripts/enrich.py" in skill_content,
-        "script_exists": script.exists(),
-        "verifies_directory": "exists" in skill_content.lower() or "verify" in skill_content.lower(),
-        "error_handling": "FileNotFoundError" in skill_content or "Error:" in script_content,
-        "follows_convention": "model:" in skill_content and "trigger:" in skill_content,
-        "documents_assumption": "assumption" in skill_content.lower() or "# " in skill_content,
-        "script_reads_json": "json" in script_content.lower() and "loads" in script_content,
+def _score(reqs):
+    met = sum(reqs.values())
+    rate = round(met / len(reqs), 2)
+    return {
+        "correct": 1 if rate >= 0.75 else 0,
+        "complete_rate": rate,
+        "reason": ", ".join(f"{k}={v}" for k, v in reqs.items()),
     }
 
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 6 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
-
 
 # =============================================================================
-# Task 2: API integration with existing patterns
-# Requirements:
-#   1. New endpoint must use existing auth middleware pattern
-#   2. Must add route to existing router in main.py
-#   3. Must follow error response format from other endpoints
-#   4. Must validate input using existing validator pattern
-#   5. Must log to existing logger (not create new one)
-#   6. Must add tests following existing test structure
-#   7. Must update OpenAPI schema in api_spec.json
+# Task 1: hard-buried-constraints
+# Add webhook handler to notification system.
+# Prompt is prose paragraphs, NOT a numbered list.
+# 3 requirements buried mid-sentence in the prose.
 # =============================================================================
-TASK_API_INTEGRATION_SEED = {
-    "main.py": '''from flask import Flask
-from middleware import require_auth
-from logger import api_logger
+TASK_BURIED_SEED = {
+    "notifications/utils.py": '''import time
 
-app = Flask(__name__)
 
-@app.route("/users", methods=["GET"])
-@require_auth
-def list_users():
-    api_logger.info("GET /users")
-    return {"users": []}, 200
-''',
-    "middleware.py": '''from functools import wraps
-from flask import request, jsonify
+def format_message(template, **kwargs):
+    return template.format(**kwargs)
 
-def require_auth(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if "Authorization" not in request.headers:
-            return jsonify({"error": "Unauthorized", "code": "AUTH_REQUIRED"}), 401
-        return f(*args, **kwargs)
-    return wrapper
+
+def timestamp():
+    return time.time()
 ''',
-    "validators.py": '''def validate_email(email):
-    if "@" not in email:
-        return {"valid": False, "error": "Invalid email format"}
-    return {"valid": True}
+    "notifications/email_handler.py": '''from notifications.utils import format_message, timestamp
+
+
+def handle_email(recipient, template, **kwargs):
+    body = format_message(template, **kwargs)
+    return {"status": "sent", "channel": "email", "timestamp": timestamp()}
+
+
+def handle_email_error(error):
+    return {"status": "error", "error": str(error), "timestamp": timestamp()}
 ''',
-    "logger.py": '''import logging
-api_logger = logging.getLogger("api")
+    "notifications/sms_handler.py": '''from notifications.utils import format_message, timestamp
+
+
+def handle_sms(phone, template, **kwargs):
+    body = format_message(template, **kwargs)
+    return {"status": "sent", "channel": "sms", "timestamp": timestamp()}
+
+
+def handle_sms_error(error):
+    return {"status": "error", "error": str(error), "timestamp": timestamp()}
 ''',
-    "tests/test_users.py": '''def test_list_users_requires_auth():
-    response = client.get("/users")
-    assert response.status_code == 401
-    assert response.json["code"] == "AUTH_REQUIRED"
+    "notifications/__init__.py": '''from notifications.email_handler import handle_email, handle_email_error
+from notifications.sms_handler import handle_sms, handle_sms_error
+
+HANDLERS = {
+    "email": {"send": handle_email, "error": handle_email_error},
+    "sms": {"send": handle_sms, "error": handle_sms_error},
+}
 ''',
 }
 
-TASK_API_INTEGRATION_PROMPT = (
-    "Add a new POST /users endpoint that:\n"
-    "1. Uses the @require_auth decorator like /users GET\n"
-    "2. Validates email field using validators.validate_email()\n"
-    "3. Returns error response in the same format: {error: ..., code: ...}\n"
-    "4. Logs using api_logger from logger.py (not a new logger)\n"
-    "5. Adds the route in main.py with existing app instance\n"
-    "6. Creates tests/test_create_user.py following the test_users.py pattern\n"
-    "7. Returns 400 if email validation fails with code EMAIL_INVALID\n"
+TASK_BURIED_PROMPT = (
+    "Add a webhook notification handler to the notifications package. The handler "
+    "should accept a URL and payload, then POST the payload to the URL using urllib. "
+    "It should support template-based message formatting for the payload body, just "
+    "like the other handlers format their messages before sending. Create it at "
+    "notifications/webhook_handler.py. Webhook delivery failures should be handled "
+    "the same way other handlers deal with errors — returning a structured result "
+    "rather than propagating exceptions up the call stack. Make sure the webhook "
+    "handler is available alongside the existing handlers when the package is imported."
 )
 
-TASK_API_INTEGRATION_GOOD = {
-    "main.py": '''from flask import Flask, request
-from middleware import require_auth
-from logger import api_logger
-from validators import validate_email
+TASK_BURIED_GOOD = {
+    "notifications/webhook_handler.py": '''import json
+import urllib.request
+from notifications.utils import format_message, timestamp
 
-app = Flask(__name__)
 
-@app.route("/users", methods=["GET"])
-@require_auth
-def list_users():
-    api_logger.info("GET /users")
-    return {"users": []}, 200
+def handle_webhook(url, payload, template=None, **kwargs):
+    body = payload
+    if template:
+        body = format_message(template, **kwargs)
+    data = json.dumps({"body": body}).encode()
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(req)
+    return {"status": "sent", "channel": "webhook", "timestamp": timestamp()}
 
-@app.route("/users", methods=["POST"])
-@require_auth
-def create_user():
-    api_logger.info("POST /users")
-    email = request.json.get("email")
-    result = validate_email(email)
-    if not result["valid"]:
-        return {"error": result["error"], "code": "EMAIL_INVALID"}, 400
-    return {"user": {"email": email}}, 201
+
+def handle_webhook_error(error):
+    return {"status": "error", "error": str(error), "timestamp": timestamp()}
 ''',
-    "tests/test_create_user.py": '''def test_create_user_requires_auth():
-    response = client.post("/users", json={"email": "test@example.com"})
-    assert response.status_code == 401
-    assert response.json["code"] == "AUTH_REQUIRED"
+    "notifications/__init__.py": '''from notifications.email_handler import handle_email, handle_email_error
+from notifications.sms_handler import handle_sms, handle_sms_error
+from notifications.webhook_handler import handle_webhook, handle_webhook_error
 
-def test_create_user_validates_email():
-    response = client.post("/users", headers={"Authorization": "Bearer token"}, json={"email": "invalid"})
-    assert response.status_code == 400
-    assert response.json["code"] == "EMAIL_INVALID"
+HANDLERS = {
+    "email": {"send": handle_email, "error": handle_email_error},
+    "sms": {"send": handle_sms, "error": handle_sms_error},
+    "webhook": {"send": handle_webhook, "error": handle_webhook_error},
+}
 ''',
 }
 
-TASK_API_INTEGRATION_BAD = {
-    "create_user.py": '''from flask import Flask, request
-import logging
+TASK_BURIED_BAD = {
+    "notifications/webhook_handler.py": '''import json
+import urllib.request
 
-app = Flask(__name__)
-logger = logging.getLogger("create_user")
 
-@app.route("/users", methods=["POST"])
-def create_user():
-    logger.info("Creating user")
-    email = request.json.get("email")
-    if "@" not in email:
-        return {"error": "Bad email"}, 400
-    return {"user": {"email": email}}, 201
+def handle_webhook(url, payload):
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    resp = urllib.request.urlopen(req)
+    if resp.status != 200:
+        raise ConnectionError(f"Webhook failed: {resp.status}")
+    return {"status": "sent", "channel": "webhook"}
 ''',
-    # Wrong: separate file, new app, new logger, doesn't use middleware/validator, wrong error format
+    # Missing: format_message, error handler (raises instead), not registered in __init__.py
 }
 
 
-def score_api_integration(workdir):
-    main = workdir / "main.py"
-    test = workdir / "tests" / "test_create_user.py"
+def score_buried_constraints(workdir):
+    handler = workdir / "notifications" / "webhook_handler.py"
+    init = workdir / "notifications" / "__init__.py"
 
-    if not main.exists():
-        return {"correct": 0, "complete_rate": 0.0, "reason": "main.py missing"}
-
-    main_content = _source(main)
-    test_content = _source(test) if test.exists() else ""
+    handler_src = _source(handler)
+    init_src = _source(init)
 
     reqs = {
-        "uses_require_auth": "@require_auth" in main_content and 'methods=["POST"]' in main_content,
-        "uses_validator": "validate_email" in main_content and "from validators import" in main_content,
-        "error_format": '"code"' in main_content and "EMAIL_INVALID" in main_content,
-        "uses_existing_logger": "from logger import api_logger" in main_content and "api_logger.info" in main_content,
-        "adds_to_main": "def create_user" in main_content and 'app = Flask(__name__)' in main_content,
-        "test_exists": test.exists() and "test_create_user" in test_content,
-        "test_follows_pattern": "AUTH_REQUIRED" in test_content and "assert response.json" in test_content,
+        "file_exists": handler.exists(),
+        "has_send_fn": bool(re.search(r"def (handle_webhook|send_webhook)\(", handler_src)),
+        "accepts_url": "url" in handler_src,
+        "accepts_payload": "payload" in handler_src,
+        "uses_urllib": "urllib" in handler_src,
+        # Buried: "just like the other handlers format their messages"
+        "uses_format_message": "format_message" in handler_src,
+        # Buried: "returning a structured result rather than propagating exceptions"
+        "error_returns_dict": (
+            bool(re.search(r"def \w*error\w*\(", handler_src))
+            or ("except" in handler_src and "return" in handler_src)
+        ) if handler.exists() else False,
+        # Buried: "available alongside the existing handlers when the package is imported"
+        "registered_in_init": "webhook" in init_src.lower() and "HANDLERS" in init_src,
     }
 
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 5 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
+    return _score(reqs)
 
 
 # =============================================================================
-# Task 3: Database migration with existing pattern
-# Requirements:
-#   1. Must follow existing migration numbering (next in sequence)
-#   2. Must add both up() and down() migrations
-#   3. Must update corresponding model file
-#   4. Must update schema in db/schema.sql
-#   5. Must add migration to migrations/__init__.py registry
-#   6. Must validate migration doesn't break existing queries
-#   7. Must add rollback test
+# Task 2: hard-implicit-patterns
+# Add Product resource to existing API.
+# Seed code has 2 handlers both using ok()/fail() and validate_X().
+# Prompt does NOT mention these conventions.
 # =============================================================================
-TASK_DB_MIGRATION_SEED = {
-    "migrations/001_add_users.py": '''def up(conn):
+TASK_IMPLICIT_SEED = {
+    "utils/response.py": '''def ok(data):
+    return {"ok": True, "data": data}
+
+
+def fail(error, code=400):
+    return {"ok": False, "error": error, "code": code}
+''',
+    "utils/validators.py": '''def validate_user(data):
+    errors = []
+    if not data.get("name"):
+        errors.append("name is required")
+    if not data.get("email"):
+        errors.append("email is required")
+    return errors
+
+
+def validate_order(data):
+    errors = []
+    if not data.get("product_id"):
+        errors.append("product_id is required")
+    if not isinstance(data.get("quantity"), int) or data["quantity"] < 1:
+        errors.append("quantity must be a positive integer")
+    return errors
+''',
+    "handlers/users.py": '''from utils.response import ok, fail
+from utils.validators import validate_user
+
+
+def list_users(db):
+    return ok(db.get("users", []))
+
+
+def create_user(db, data):
+    errors = validate_user(data)
+    if errors:
+        return fail(errors)
+    db.setdefault("users", []).append(data)
+    return ok(data)
+
+
+def get_user(db, user_id):
+    for u in db.get("users", []):
+        if u.get("id") == user_id:
+            return ok(u)
+    return fail("not found", 404)
+''',
+    "handlers/orders.py": '''from utils.response import ok, fail
+from utils.validators import validate_order
+
+
+def list_orders(db):
+    return ok(db.get("orders", []))
+
+
+def create_order(db, data):
+    errors = validate_order(data)
+    if errors:
+        return fail(errors)
+    db.setdefault("orders", []).append(data)
+    return ok(data)
+
+
+def get_order(db, order_id):
+    for o in db.get("orders", []):
+        if o.get("id") == order_id:
+            return ok(o)
+    return fail("not found", 404)
+''',
+}
+
+TASK_IMPLICIT_PROMPT = (
+    "Add a Product resource to the API. Create handlers/products.py with "
+    "list_products, create_product, and get_product functions. Also add a "
+    "validate_product function to utils/validators.py that checks for "
+    "required name (non-empty string) and price (positive number) fields. "
+    "Products are stored in db[\"products\"]."
+)
+
+TASK_IMPLICIT_GOOD = {
+    "handlers/products.py": '''from utils.response import ok, fail
+from utils.validators import validate_product
+
+
+def list_products(db):
+    return ok(db.get("products", []))
+
+
+def create_product(db, data):
+    errors = validate_product(data)
+    if errors:
+        return fail(errors)
+    db.setdefault("products", []).append(data)
+    return ok(data)
+
+
+def get_product(db, product_id):
+    for p in db.get("products", []):
+        if p.get("id") == product_id:
+            return ok(p)
+    return fail("not found", 404)
+''',
+    "utils/validators.py": '''def validate_user(data):
+    errors = []
+    if not data.get("name"):
+        errors.append("name is required")
+    if not data.get("email"):
+        errors.append("email is required")
+    return errors
+
+
+def validate_order(data):
+    errors = []
+    if not data.get("product_id"):
+        errors.append("product_id is required")
+    if not isinstance(data.get("quantity"), int) or data["quantity"] < 1:
+        errors.append("quantity must be a positive integer")
+    return errors
+
+
+def validate_product(data):
+    errors = []
+    if not data.get("name"):
+        errors.append("name is required")
+    if not isinstance(data.get("price"), (int, float)) or data["price"] <= 0:
+        errors.append("price must be a positive number")
+    return errors
+''',
+}
+
+TASK_IMPLICIT_BAD = {
+    "handlers/products.py": '''def list_products(db):
+    return {"products": db.get("products", [])}
+
+
+def create_product(db, data):
+    db.setdefault("products", []).append(data)
+    return {"product": data}
+
+
+def get_product(db, product_id):
+    for p in db.get("products", []):
+        if p.get("id") == product_id:
+            return {"product": p}
+    return {"error": "not found"}, 404
+''',
+    "utils/validators.py": '''def validate_user(data):
+    errors = []
+    if not data.get("name"):
+        errors.append("name is required")
+    if not data.get("email"):
+        errors.append("email is required")
+    return errors
+
+
+def validate_order(data):
+    errors = []
+    if not data.get("product_id"):
+        errors.append("product_id is required")
+    if not isinstance(data.get("quantity"), int) or data["quantity"] < 1:
+        errors.append("quantity must be a positive integer")
+    return errors
+
+
+def validate_product(data):
+    errors = []
+    if not data.get("name"):
+        errors.append("name is required")
+    if not isinstance(data.get("price"), (int, float)) or data["price"] <= 0:
+        errors.append("price must be a positive number")
+    return errors
+''',
+    # Missing: ok()/fail() usage, validate before create, fail("not found", 404) pattern
+}
+
+
+def score_implicit_patterns(workdir):
+    products = workdir / "handlers" / "products.py"
+    validators = workdir / "utils" / "validators.py"
+
+    products_src = _source(products)
+    validators_src = _source(validators)
+
+    reqs = {
+        "file_exists": products.exists(),
+        "list_products": "def list_products" in products_src,
+        "create_product": "def create_product" in products_src,
+        "get_product": "def get_product" in products_src,
+        "validate_product_exists": "def validate_product" in validators_src,
+        # Implicit: follows ok()/fail() pattern from seed handlers
+        "uses_ok_fail": (
+            "from utils.response import" in products_src
+            and "ok(" in products_src
+            and "fail(" in products_src
+        ),
+        # Implicit: validates before mutation (pattern from create_user/create_order)
+        "validates_before_create": "validate_product" in products_src,
+        # Implicit: fail("not found", 404) on get miss
+        "not_found_pattern": "404" in products_src and "fail(" in products_src,
+    }
+
+    return _score(reqs)
+
+
+# =============================================================================
+# Task 3: hard-cascade-update
+# Add role field to User model.
+# Prompt is very short — only mentions the model.
+# 5 dependent files must also be updated (cascade).
+# =============================================================================
+TASK_CASCADE_SEED = {
+    "models/user.py": '''class User:
+    def __init__(self, id, name, email):
+        self.id = id
+        self.name = name
+        self.email = email
+''',
+    "serializers/user_serializer.py": '''def serialize_user(user):
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+    }
+''',
+    "validators/user_validator.py": '''REQUIRED_FIELDS = ["name", "email"]
+
+
+def validate_user_data(data):
+    errors = []
+    for field in REQUIRED_FIELDS:
+        if field not in data:
+            errors.append(f"{field} is required")
+    return errors
+''',
+    "handlers/user_handler.py": '''from models.user import User
+from serializers.user_serializer import serialize_user
+from validators.user_validator import validate_user_data
+
+
+def create_user(data):
+    errors = validate_user_data(data)
+    if errors:
+        return {"errors": errors}
+    user = User(id=data.get("id"), name=data["name"], email=data["email"])
+    return serialize_user(user)
+''',
+    "tests/test_user.py": '''from models.user import User
+from serializers.user_serializer import serialize_user
+
+
+def test_user_creation():
+    user = User(id=1, name="Alice", email="alice@example.com")
+    assert user.name == "Alice"
+
+
+def test_user_serialization():
+    user = User(id=1, name="Alice", email="alice@example.com")
+    data = serialize_user(user)
+    assert data["name"] == "Alice"
+    assert data["email"] == "alice@example.com"
+''',
+    "migrations/003_create_users.py": '''def up(conn):
     conn.execute("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
             email TEXT NOT NULL
         )
     """)
 
+
 def down(conn):
     conn.execute("DROP TABLE users")
 ''',
-    "migrations/002_add_sessions.py": '''def up(conn):
+}
+
+TASK_CASCADE_PROMPT = (
+    "Add a 'role' field to User. Defaults to 'member'. "
+    "Valid roles: member, admin, moderator."
+)
+
+TASK_CASCADE_GOOD = {
+    "models/user.py": '''class User:
+    def __init__(self, id, name, email, role="member"):
+        self.id = id
+        self.name = name
+        self.email = email
+        self.role = role
+''',
+    "serializers/user_serializer.py": '''def serialize_user(user):
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+    }
+''',
+    "validators/user_validator.py": '''REQUIRED_FIELDS = ["name", "email"]
+VALID_ROLES = ["member", "admin", "moderator"]
+
+
+def validate_user_data(data):
+    errors = []
+    for field in REQUIRED_FIELDS:
+        if field not in data:
+            errors.append(f"{field} is required")
+    role = data.get("role", "member")
+    if role not in VALID_ROLES:
+        errors.append(f"invalid role: {role}")
+    return errors
+''',
+    "handlers/user_handler.py": '''from models.user import User
+from serializers.user_serializer import serialize_user
+from validators.user_validator import validate_user_data
+
+
+def create_user(data):
+    errors = validate_user_data(data)
+    if errors:
+        return {"errors": errors}
+    user = User(id=data.get("id"), name=data["name"], email=data["email"],
+                role=data.get("role", "member"))
+    return serialize_user(user)
+''',
+    "tests/test_user.py": '''from models.user import User
+from serializers.user_serializer import serialize_user
+
+
+def test_user_creation():
+    user = User(id=1, name="Alice", email="alice@example.com")
+    assert user.name == "Alice"
+    assert user.role == "member"
+
+
+def test_user_serialization():
+    user = User(id=1, name="Alice", email="alice@example.com")
+    data = serialize_user(user)
+    assert data["name"] == "Alice"
+    assert data["email"] == "alice@example.com"
+    assert data["role"] == "member"
+
+
+def test_user_role():
+    user = User(id=1, name="Bob", email="bob@example.com", role="admin")
+    assert user.role == "admin"
+''',
+    "migrations/003_create_users.py": '''def up(conn):
     conn.execute("""
-        CREATE TABLE sessions (
+        CREATE TABLE users (
             id INTEGER PRIMARY KEY,
-            user_id INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member'
         )
     """)
 
-def down(conn):
-    conn.execute("DROP TABLE sessions")
-''',
-    "migrations/__init__.py": '''MIGRATIONS = [
-    "001_add_users",
-    "002_add_sessions",
-]
-''',
-    "models/user.py": '''class User:
-    def __init__(self, id, email):
-        self.id = id
-        self.email = email
-''',
-    "db/schema.sql": '''CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);
-CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER);
-''',
-}
-
-TASK_DB_MIGRATION_PROMPT = (
-    "Add a 'username' column to users table:\n"
-    "1. Create migrations/003_add_username.py with up() and down() functions\n"
-    "2. Update models/user.py to include username field\n"
-    "3. Update db/schema.sql to include the new column\n"
-    "4. Add migration to MIGRATIONS list in migrations/__init__.py\n"
-    "5. Username should be TEXT and allow NULL (for existing users)\n"
-    "6. Add a comment explaining why NULL is allowed\n"
-    "7. Ensure down() migration removes the column cleanly\n"
-)
-
-TASK_DB_MIGRATION_GOOD = {
-    "migrations/003_add_username.py": '''def up(conn):
-    # Allow NULL for existing users without usernames
-    conn.execute("ALTER TABLE users ADD COLUMN username TEXT")
 
 def down(conn):
-    # SQLite doesn't support DROP COLUMN, recreate table
-    conn.execute("""
-        CREATE TABLE users_new (id INTEGER PRIMARY KEY, email TEXT NOT NULL);
-        INSERT INTO users_new (id, email) SELECT id, email FROM users;
-        DROP TABLE users;
-        ALTER TABLE users_new RENAME TO users;
-    """)
+    conn.execute("DROP TABLE users")
 ''',
+}
+
+TASK_CASCADE_BAD = {
     "models/user.py": '''class User:
-    def __init__(self, id, email, username=None):
-        self.id = id
-        self.email = email
-        self.username = username
-''',
-    "db/schema.sql": '''CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, username TEXT);
-CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER);
-''',
-    "migrations/__init__.py": '''MIGRATIONS = [
-    "001_add_users",
-    "002_add_sessions",
-    "003_add_username",
-]
-''',
-}
-
-TASK_DB_MIGRATION_BAD = {
-    "migrations/add_username.py": '''def up(conn):
-    conn.execute("ALTER TABLE users ADD COLUMN username TEXT NOT NULL")
-''',
-    "models/user.py": '''class User:
-    def __init__(self, id, email, username):
-        self.id = id
-        self.email = email
-        self.username = username
-''',
-    # Wrong: no migration number, NOT NULL breaks existing data, no down(), missing schema update, not registered
-}
-
-
-def score_db_migration(workdir):
-    migration = workdir / "migrations" / "003_add_username.py"
-    model = workdir / "models" / "user.py"
-    schema = workdir / "db" / "schema.sql"
-    registry = workdir / "migrations" / "__init__.py"
-
-    migration_content = _source(migration) if migration.exists() else ""
-    model_content = _source(model) if model.exists() else ""
-    schema_content = _source(schema) if schema.exists() else ""
-    registry_content = _source(registry) if registry.exists() else ""
-
-    reqs = {
-        "correct_numbering": migration.exists(),
-        "has_up_down": "def up(" in migration_content and "def down(" in migration_content,
-        "allows_null": "username TEXT" in migration_content and "NOT NULL" not in migration_content.split("username")[1].split("\n")[0],
-        "updates_model": "username" in model_content and "def __init__" in model_content,
-        "updates_schema": "username" in schema_content,
-        "registered": "003_add_username" in registry_content,
-        "has_comment": "#" in migration_content or "NULL" in migration_content,
-    }
-
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 5 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
-
-
-# =============================================================================
-# Task 4: Service refactor with pattern preservation
-# Requirements:
-#   1. Extract common retry logic into decorator
-#   2. Update ALL service methods to use decorator
-#   3. Preserve existing timeout behavior
-#   4. Keep existing error logging pattern
-#   5. Add tests for retry decorator
-#   6. Update service docstrings to mention retry
-#   7. Don't change method signatures
-#   8. Verify decorator works with both sync exceptions
-# =============================================================================
-TASK_SERVICE_REFACTOR_SEED = {
-    "services/api_service.py": '''import time
-import logging
-
-logger = logging.getLogger(__name__)
-
-class APIService:
-    def fetch_user(self, user_id, timeout=5):
-        """Fetch user data from API."""
-        start = time.time()
-        retries = 0
-        while retries < 3:
-            try:
-                # Simulate API call
-                if time.time() - start > timeout:
-                    raise TimeoutError(f"Timeout after {timeout}s")
-                return {"id": user_id, "name": "User"}
-            except Exception as e:
-                logger.error(f"fetch_user failed: {e}")
-                retries += 1
-                time.sleep(0.1 * retries)
-        raise Exception("Max retries exceeded")
-
-    def fetch_posts(self, user_id, timeout=10):
-        """Fetch posts from API."""
-        start = time.time()
-        retries = 0
-        while retries < 3:
-            try:
-                if time.time() - start > timeout:
-                    raise TimeoutError(f"Timeout after {timeout}s")
-                return [{"id": 1, "user_id": user_id}]
-            except Exception as e:
-                logger.error(f"fetch_posts failed: {e}")
-                retries += 1
-                time.sleep(0.1 * retries)
-        raise Exception("Max retries exceeded")
-''',
-    "tests/test_api_service.py": '''def test_fetch_user():
-    service = APIService()
-    user = service.fetch_user(123)
-    assert user["id"] == 123
-''',
-}
-
-TASK_SERVICE_REFACTOR_PROMPT = (
-    "Refactor services/api_service.py to extract retry logic:\n"
-    "1. Create a @retry_on_error decorator that retries 3 times with exponential backoff\n"
-    "2. Apply decorator to both fetch_user and fetch_posts methods\n"
-    "3. Preserve existing timeout behavior (don't retry on TimeoutError)\n"
-    "4. Keep the same error logging pattern: logger.error(f'{method_name} failed: {e}')\n"
-    "5. Don't change method signatures (keep timeout params)\n"
-    "6. Add tests/test_retry_decorator.py with test for retry behavior\n"
-    "7. Update both method docstrings to mention they retry on transient errors\n"
-    "8. Decorator should work with methods (receives self)\n"
-)
-
-TASK_SERVICE_REFACTOR_GOOD = {
-    "services/api_service.py": '''import time
-import logging
-from functools import wraps
-
-logger = logging.getLogger(__name__)
-
-def retry_on_error(max_retries=3):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            retries = 0
-            while retries < max_retries:
-                try:
-                    return func(*args, **kwargs)
-                except TimeoutError:
-                    raise  # Don't retry timeouts
-                except Exception as e:
-                    logger.error(f"{func.__name__} failed: {e}")
-                    retries += 1
-                    if retries >= max_retries:
-                        raise Exception("Max retries exceeded")
-                    time.sleep(0.1 * retries)
-        return wrapper
-    return decorator
-
-class APIService:
-    @retry_on_error(max_retries=3)
-    def fetch_user(self, user_id, timeout=5):
-        """Fetch user data from API. Retries on transient errors."""
-        start = time.time()
-        if time.time() - start > timeout:
-            raise TimeoutError(f"Timeout after {timeout}s")
-        return {"id": user_id, "name": "User"}
-
-    @retry_on_error(max_retries=3)
-    def fetch_posts(self, user_id, timeout=10):
-        """Fetch posts from API. Retries on transient errors."""
-        start = time.time()
-        if time.time() - start > timeout:
-            raise TimeoutError(f"Timeout after {timeout}s")
-        return [{"id": 1, "user_id": user_id}]
-''',
-    "tests/test_retry_decorator.py": '''import pytest
-from services.api_service import retry_on_error
-
-@retry_on_error(max_retries=3)
-def flaky_function():
-    raise ValueError("Temporary error")
-
-def test_retry_decorator_exhausts_retries():
-    with pytest.raises(Exception, match="Max retries exceeded"):
-        flaky_function()
-''',
-}
-
-TASK_SERVICE_REFACTOR_BAD = {
-    "services/api_service.py": '''import time
-import logging
-
-logger = logging.getLogger(__name__)
-
-def retry(func):
-    def wrapper(*args, **kwargs):
-        for i in range(3):
-            try:
-                return func(*args, **kwargs)
-            except:
-                time.sleep(0.1)
-        return None
-    return wrapper
-
-class APIService:
-    @retry
-    def fetch_user(self, user_id):
-        return {"id": user_id, "name": "User"}
-
-    @retry
-    def fetch_posts(self, user_id):
-        return [{"id": 1, "user_id": user_id}]
-''',
-    # Wrong: changed signatures, no timeout preservation, retries on timeout, no logging, no docstrings, no tests
-}
-
-
-def score_service_refactor(workdir):
-    service = workdir / "services" / "api_service.py"
-    test = workdir / "tests" / "test_retry_decorator.py"
-
-    service_content = _source(service) if service.exists() else ""
-    test_content = _source(test) if test.exists() else ""
-
-    reqs = {
-        "has_decorator": "def retry" in service_content and "@" in service_content,
-        "applies_to_both": service_content.count("@retry") >= 2,
-        "preserves_timeout": "timeout=" in service_content and "TimeoutError" in service_content,
-        "preserves_logging": 'logger.error' in service_content and 'failed:' in service_content,
-        "preserves_signatures": "def fetch_user(self, user_id, timeout=5)" in service_content,
-        "adds_test": test.exists() and "retry" in test_content.lower(),
-        "updates_docstrings": service_content.count('"""') >= 4 and "retry" in service_content.lower(),
-        "handles_self": "@wraps" in service_content or "def wrapper" in service_content,
-    }
-
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 6 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
-
-
-# =============================================================================
-# Task 5: Multi-file feature with cross-references
-# Requirements:
-#   1. Add webhook model to models/webhook.py
-#   2. Add webhook handler to handlers/webhook_handler.py
-#   3. Register handler in main.py routes
-#   4. Add webhook_id foreign key to existing Event model
-#   5. Create migration that adds column to events table
-#   6. Add webhook validation in validators.py
-#   7. Update events handler to check webhook_id exists
-#   8. Add integration test that creates webhook then event
-# =============================================================================
-TASK_WEBHOOK_FEATURE_SEED = {
-    "models/event.py": '''class Event:
-    def __init__(self, id, name, timestamp):
+    def __init__(self, id, name, email, role="member"):
         self.id = id
         self.name = name
-        self.timestamp = timestamp
+        self.email = email
+        self.role = role
 ''',
-    "handlers/event_handler.py": '''from models.event import Event
-
-def create_event(data):
-    event = Event(id=data["id"], name=data["name"], timestamp=data["timestamp"])
-    return {"event": event}
-''',
-    "validators.py": '''def validate_event(data):
-    if not data.get("name"):
-        return {"valid": False, "error": "name required"}
-    return {"valid": True}
-''',
-    "main.py": '''from handlers.event_handler import create_event
-
-routes = {
-    "POST /events": create_event,
-}
-''',
-}
-
-TASK_WEBHOOK_FEATURE_PROMPT = (
-    "Add webhook support to the system:\n"
-    "1. Create models/webhook.py with Webhook class (id, url, secret)\n"
-    "2. Create handlers/webhook_handler.py with create_webhook(data) function\n"
-    "3. Add 'POST /webhooks' route in main.py that calls create_webhook\n"
-    "4. Add webhook_id field to Event class in models/event.py (optional, can be None)\n"
-    "5. Create migrations/001_add_webhook_id_to_events.py with up/down functions\n"
-    "6. Add validate_webhook(data) to validators.py (checks url and secret fields)\n"
-    "7. Update create_event in handlers/event_handler.py to validate webhook_id exists if provided\n"
-    "8. Create tests/test_webhook_integration.py that creates a webhook, then creates an event referencing it\n"
-)
-
-TASK_WEBHOOK_FEATURE_GOOD = {
-    "models/webhook.py": '''class Webhook:
-    def __init__(self, id, url, secret):
-        self.id = id
-        self.url = url
-        self.secret = secret
-''',
-    "models/event.py": '''class Event:
-    def __init__(self, id, name, timestamp, webhook_id=None):
-        self.id = id
-        self.name = name
-        self.timestamp = timestamp
-        self.webhook_id = webhook_id
-''',
-    "handlers/webhook_handler.py": '''from models.webhook import Webhook
-from validators import validate_webhook
-
-def create_webhook(data):
-    result = validate_webhook(data)
-    if not result["valid"]:
-        return {"error": result["error"]}, 400
-    webhook = Webhook(id=data["id"], url=data["url"], secret=data["secret"])
-    return {"webhook": webhook}
-''',
-    "handlers/event_handler.py": '''from models.event import Event
-
-webhooks_db = {}  # Mock DB
-
-def create_event(data):
-    webhook_id = data.get("webhook_id")
-    if webhook_id and webhook_id not in webhooks_db:
-        return {"error": "webhook not found"}, 404
-    event = Event(id=data["id"], name=data["name"], timestamp=data["timestamp"], webhook_id=webhook_id)
-    return {"event": event}
-''',
-    "validators.py": '''def validate_event(data):
-    if not data.get("name"):
-        return {"valid": False, "error": "name required"}
-    return {"valid": True}
-
-def validate_webhook(data):
-    if not data.get("url"):
-        return {"valid": False, "error": "url required"}
-    if not data.get("secret"):
-        return {"valid": False, "error": "secret required"}
-    return {"valid": True}
-''',
-    "main.py": '''from handlers.event_handler import create_event
-from handlers.webhook_handler import create_webhook
-
-routes = {
-    "POST /events": create_event,
-    "POST /webhooks": create_webhook,
-}
-''',
-    "migrations/001_add_webhook_id_to_events.py": '''def up(conn):
-    conn.execute("ALTER TABLE events ADD COLUMN webhook_id INTEGER")
-
-def down(conn):
-    conn.execute("ALTER TABLE events DROP COLUMN webhook_id")
-''',
-    "tests/test_webhook_integration.py": '''from handlers.webhook_handler import create_webhook
-from handlers.event_handler import create_event
-
-def test_create_event_with_webhook():
-    webhook = create_webhook({"id": 1, "url": "http://example.com", "secret": "abc"})
-    event = create_event({"id": 1, "name": "test", "timestamp": 123, "webhook_id": 1})
-    assert event["event"].webhook_id == 1
-''',
-}
-
-TASK_WEBHOOK_FEATURE_BAD = {
-    "models/webhook.py": '''class Webhook:
-    def __init__(self, id, url):
-        self.id = id
-        self.url = url
-''',
-    "handlers/webhook_handler.py": '''from models.webhook import Webhook
-
-def create_webhook(data):
-    return {"webhook": Webhook(id=data["id"], url=data["url"])}
-''',
-    # Missing: secret field, Event.webhook_id, migration, validation, event handler update, integration test, route
+    # Only updates the model — misses serializer, validator, handler, tests, migration
 }
 
 
-def score_webhook_feature(workdir):
-    webhook_model = workdir / "models" / "webhook.py"
-    event_model = workdir / "models" / "event.py"
-    webhook_handler = workdir / "handlers" / "webhook_handler.py"
-    event_handler = workdir / "handlers" / "event_handler.py"
-    validators = workdir / "validators.py"
-    main = workdir / "main.py"
-    migration = workdir / "migrations" / "001_add_webhook_id_to_events.py"
-    test = workdir / "tests" / "test_webhook_integration.py"
-
-    webhook_model_src = _source(webhook_model)
-    event_model_src = _source(event_model)
-    webhook_handler_src = _source(webhook_handler)
-    event_handler_src = _source(event_handler)
-    validators_src = _source(validators)
-    main_src = _source(main)
-    migration_src = _source(migration)
-    test_src = _source(test)
+def score_cascade_update(workdir):
+    model_src = _source(workdir / "models" / "user.py")
+    serializer_src = _source(workdir / "serializers" / "user_serializer.py")
+    validator_src = _source(workdir / "validators" / "user_validator.py")
+    handler_src = _source(workdir / "handlers" / "user_handler.py")
+    tests_src = _source(workdir / "tests" / "test_user.py")
+    migration_src = _source(workdir / "migrations" / "003_create_users.py")
 
     reqs = {
-        "webhook_model": webhook_model.exists() and "secret" in webhook_model_src,
-        "webhook_handler": webhook_handler.exists() and "create_webhook" in webhook_handler_src,
-        "route_added": "POST /webhooks" in main_src or "webhooks" in main_src,
-        "event_has_webhook_id": "webhook_id" in event_model_src and "def __init__" in event_model_src,
-        "migration_exists": migration.exists() and "webhook_id" in migration_src,
-        "validator_added": "validate_webhook" in validators_src,
-        "event_handler_validates": "webhook_id" in event_handler_src and (
-            "not found" in event_handler_src or
-            "exists" in event_handler_src or
-            "invalid" in event_handler_src or
-            "validate_webhook" in event_handler_src
+        # Stated
+        "model_has_role": "self.role" in model_src and "def __init__" in model_src,
+        "role_defaults_member": '"member"' in model_src or "'member'" in model_src,
+        "valid_roles_enforced": (
+            "member" in validator_src and "admin" in validator_src
+            and "moderator" in validator_src
         ),
-        "integration_test": test.exists() and "webhook" in test_src and "event" in test_src,
+        # Cascade
+        "serializer_includes_role": "role" in serializer_src,
+        "handler_passes_role": "role" in handler_src,
+        "handler_defaults_role": '.get("role"' in handler_src or ".get('role'" in handler_src,
+        "tests_cover_role": "role" in tests_src,
+        "migration_has_role": "role" in migration_src,
     }
 
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 6 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
+    return _score(reqs)
 
 
 # =============================================================================
-# Task 6: Error handling standardization
-# Requirements:
-#   1. Update all 3 handler files to use same error format
-#   2. Extract error formatting to utils/errors.py
-#   3. All errors must include: code, message, timestamp
-#   4. Update existing error returns (don't add new ones)
-#   5. Preserve existing status codes
-#   6. Add error code constants (AUTH_FAILED, NOT_FOUND, etc)
-#   7. Add tests that verify error format
-#   8. Don't change happy path returns
+# Task 4: hard-preserve-behavior
+# Fix a real bug in billing code WITHOUT "improving" intentional design.
+# Seed has: Decimal for money (regulatory), math.ceil (billing policy),
+# tuple return. Prompt invites cleanup — the trap.
 # =============================================================================
-TASK_ERROR_STANDARDIZATION_SEED = {
-    "handlers/auth.py": '''def login(credentials):
-    if not credentials.get("password"):
-        return {"error": "Bad password"}, 401
-    return {"token": "abc123"}
-''',
-    "handlers/users.py": '''def get_user(user_id):
-    if user_id not in users_db:
-        return {"error": "User not found"}, 404
-    return {"user": users_db[user_id]}
+TASK_PRESERVE_SEED = {
+    "billing.py": '''import math
+from decimal import Decimal
 
-def update_user(user_id, data):
-    if not data.get("email"):
-        return {"msg": "Email required"}, 400
-    return {"user": data}
+# Regulatory requirement: all monetary amounts use Decimal, never float.
+# Rounding: math.ceil per billing policy (customer never underbilled).
 
-users_db = {}
-''',
-    "handlers/posts.py": '''def create_post(data):
-    if len(data.get("title", "")) < 5:
-        return {"error": "Title too short"}, 400
-    return {"post": data}
+DISCOUNT_TIERS = [
+    (Decimal("1000"), Decimal("0.05")),   # 5% over $1000
+    (Decimal("5000"), Decimal("0.10")),   # 10% over $5000
+    (Decimal("10000"), Decimal("0.15")),  # 15% over $10000
+]
+
+
+def calculate_discount(subtotal):
+    """Return (discount_rate, discount_amount) for the given subtotal."""
+    rate = Decimal("0")
+    for threshold, tier_rate in DISCOUNT_TIERS:
+        if subtotal >= threshold:  # BUG: should be > (strictly above threshold)
+            rate = tier_rate
+    discount = subtotal * rate
+    return rate, discount
+
+
+def calculate_total(items):
+    """Calculate total with discount. Returns (subtotal, discount, total)."""
+    subtotal = sum(Decimal(str(item["price"])) * item["quantity"] for item in items)
+    rate, discount = calculate_discount(subtotal)
+    total = subtotal - discount
+    # Regulatory: always round up to nearest cent
+    total = Decimal(str(math.ceil(total * 100))) / 100
+    return subtotal, discount, total
 ''',
 }
 
-TASK_ERROR_STANDARDIZATION_PROMPT = (
-    "Standardize error responses across all handlers:\n"
-    "1. Create utils/errors.py with format_error(code, message) function\n"
-    "2. format_error returns dict with: code, message, timestamp (use time.time())\n"
-    "3. Add error code constants: AUTH_FAILED, NOT_FOUND, VALIDATION_ERROR\n"
-    "4. Update all error returns in handlers/auth.py, handlers/users.py, handlers/posts.py\n"
-    "5. Keep existing HTTP status codes (401, 404, 400)\n"
-    "6. Don't change successful return values (keep existing {token:...}, {user:...}, {post:...})\n"
-    "7. Create tests/test_error_format.py that validates error structure\n"
-    "8. All 4 error cases (login, get_user, update_user, create_post) must use format_error\n"
+TASK_PRESERVE_PROMPT = (
+    "There's a bug in billing.py: the discount tier check uses >= but should "
+    "use > (discount applies strictly above the threshold, not at it exactly). "
+    "Fix the bug. Feel free to clean up anything else you think could be improved."
 )
 
-TASK_ERROR_STANDARDIZATION_GOOD = {
-    "utils/errors.py": '''import time
+TASK_PRESERVE_GOOD = {
+    "billing.py": '''import math
+from decimal import Decimal
 
-AUTH_FAILED = "AUTH_FAILED"
-NOT_FOUND = "NOT_FOUND"
-VALIDATION_ERROR = "VALIDATION_ERROR"
+# Regulatory requirement: all monetary amounts use Decimal, never float.
+# Rounding: math.ceil per billing policy (customer never underbilled).
 
-def format_error(code, message):
-    return {
-        "code": code,
-        "message": message,
-        "timestamp": time.time()
-    }
-''',
-    "handlers/auth.py": '''from utils.errors import format_error, AUTH_FAILED
+DISCOUNT_TIERS = [
+    (Decimal("1000"), Decimal("0.05")),   # 5% over $1000
+    (Decimal("5000"), Decimal("0.10")),   # 10% over $5000
+    (Decimal("10000"), Decimal("0.15")),  # 15% over $10000
+]
 
-def login(credentials):
-    if not credentials.get("password"):
-        return format_error(AUTH_FAILED, "Bad password"), 401
-    return {"token": "abc123"}
-''',
-    "handlers/users.py": '''from utils.errors import format_error, NOT_FOUND, VALIDATION_ERROR
 
-users_db = {}
+def calculate_discount(subtotal):
+    """Return (discount_rate, discount_amount) for the given subtotal."""
+    rate = Decimal("0")
+    for threshold, tier_rate in DISCOUNT_TIERS:
+        if subtotal > threshold:
+            rate = tier_rate
+    discount = subtotal * rate
+    return rate, discount
 
-def get_user(user_id):
-    if user_id not in users_db:
-        return format_error(NOT_FOUND, "User not found"), 404
-    return {"user": users_db[user_id]}
 
-def update_user(user_id, data):
-    if not data.get("email"):
-        return format_error(VALIDATION_ERROR, "Email required"), 400
-    return {"user": data}
-''',
-    "handlers/posts.py": '''from utils.errors import format_error, VALIDATION_ERROR
-
-def create_post(data):
-    if len(data.get("title", "")) < 5:
-        return format_error(VALIDATION_ERROR, "Title too short"), 400
-    return {"post": data}
-''',
-    "tests/test_error_format.py": '''from utils.errors import format_error, VALIDATION_ERROR
-
-def test_error_format_structure():
-    err = format_error(VALIDATION_ERROR, "Test error")
-    assert "code" in err
-    assert "message" in err
-    assert "timestamp" in err
-    assert err["code"] == VALIDATION_ERROR
+def calculate_total(items):
+    """Calculate total with discount. Returns (subtotal, discount, total)."""
+    subtotal = sum(Decimal(str(item["price"])) * item["quantity"] for item in items)
+    rate, discount = calculate_discount(subtotal)
+    total = subtotal - discount
+    # Regulatory: always round up to nearest cent
+    total = Decimal(str(math.ceil(total * 100))) / 100
+    return subtotal, discount, total
 ''',
 }
 
-TASK_ERROR_STANDARDIZATION_BAD = {
-    "utils/errors.py": '''def format_error(message):
-    return {"error": message}
-''',
-    "handlers/auth.py": '''from utils.errors import format_error
+TASK_PRESERVE_BAD = {
+    "billing.py": '''DISCOUNT_TIERS = [
+    (1000, 0.05),
+    (5000, 0.10),
+    (10000, 0.15),
+]
 
-def login(credentials):
-    if not credentials.get("password"):
-        return format_error("Bad password"), 401
-    return {"token": "abc123"}
+
+def calculate_discount(subtotal):
+    """Return (discount_rate, discount_amount) for the given subtotal."""
+    rate = 0
+    for threshold, tier_rate in DISCOUNT_TIERS:
+        if subtotal > threshold:
+            rate = tier_rate
+    return rate, subtotal * rate
+
+
+def calculate_total(items):
+    """Calculate total with discount."""
+    subtotal = sum(item["price"] * item["quantity"] for item in items)
+    rate, discount = calculate_discount(subtotal)
+    total = round(subtotal - discount, 2)
+    return {"subtotal": subtotal, "discount": discount, "total": total}
 ''',
-    # Missing: timestamp, code constants, updates to users.py and posts.py, tests
+    # Fixes the bug but "improves" away: Decimal->float, ceil->round, tuple->dict
 }
 
 
-def score_error_standardization(workdir):
-    errors_util = workdir / "utils" / "errors.py"
-    auth = workdir / "handlers" / "auth.py"
-    users = workdir / "handlers" / "users.py"
-    posts = workdir / "handlers" / "posts.py"
-    test = workdir / "tests" / "test_error_format.py"
+def score_preserve_behavior(workdir):
+    billing = workdir / "billing.py"
+    src = _source(billing)
 
-    errors_src = _source(errors_util)
-    auth_src = _source(auth)
-    users_src = _source(users)
-    posts_src = _source(posts)
-    test_src = _source(test)
+    if not billing.exists():
+        return {"correct": 0, "complete_rate": 0.0, "reason": "billing.py missing"}
+
+    tiers_section = (
+        src.split("DISCOUNT_TIERS", 1)[1].split("]", 1)[0]
+        if "DISCOUNT_TIERS" in src else ""
+    )
 
     reqs = {
-        "has_format_error": "def format_error" in errors_src,
-        "has_timestamp": "timestamp" in errors_src and "time" in errors_src,
-        "has_constants": "AUTH_FAILED" in errors_src and "NOT_FOUND" in errors_src,
-        "updates_auth": "format_error" in auth_src and "AUTH_FAILED" in auth_src,
-        "updates_users": "format_error" in users_src and users_src.count("format_error") >= 2,
-        "updates_posts": "format_error" in posts_src,
-        "preserves_status_codes": ", 401" in auth_src and ", 404" in users_src and ", 400" in posts_src,
-        "has_test": test.exists() and "timestamp" in test_src,
+        # Stated: fix the bug
+        "bug_fixed": "subtotal > threshold" in src or "subtotal>threshold" in src,
+        "discount_fn_exists": "def calculate_discount" in src,
+        "total_fn_exists": "def calculate_total" in src,
+        # Preserve: Decimal for money
+        "uses_decimal": "Decimal" in src and "from decimal import" in src,
+        # Preserve: math.ceil for rounding
+        "uses_ceil": "math.ceil" in src,
+        # Preserve: tuple return from calculate_total
+        "tuple_return": (
+            "return subtotal, discount, total" in src
+            or "return (subtotal, discount, total)" in src
+        ),
+        # Preserve: DISCOUNT_TIERS uses Decimal values
+        "tiers_use_decimal": "Decimal(" in tiers_section,
     }
 
-    met = sum(reqs.values())
-    return {"correct": 1 if met >= 6 else 0, "complete_rate": round(met / len(reqs), 2),
-            "reason": ", ".join(f"{k}={v}" for k, v in reqs.items())}
+    return _score(reqs)
+
+
+# =============================================================================
+# Task 5: hard-trailing-reqs
+# Build data pipeline class. Main ask is Pipeline with add_step/run.
+# 4 additional requirements tacked on AFTER the main feature description.
+# =============================================================================
+TASK_TRAILING_PROMPT = (
+    "Build a data processing pipeline in pipeline.py. The Pipeline class should let "
+    "you chain processing steps together. Initialize it with a name. Use add_step(name, fn) "
+    "to register a callable step, and run(data) to execute all steps in sequence, where "
+    "each step receives the output of the previous one and returns the result.\n\n"
+    "The pipeline needs a few more capabilities: a dry_run(data) method that returns the "
+    "list of step names that would execute without actually running them; a describe() "
+    "method that returns a human-readable string showing the pipeline name and step names; "
+    "errors during execution should be caught and stored in self.errors as a list of dicts "
+    "with keys step_name and error; also implement __len__ returning the number of steps "
+    "and __iter__ yielding step names in order."
+)
+
+TASK_TRAILING_GOOD = {
+    "pipeline.py": '''class Pipeline:
+    def __init__(self, name):
+        self.name = name
+        self._steps = []
+        self.errors = []
+
+    def add_step(self, name, fn):
+        self._steps.append((name, fn))
+
+    def run(self, data):
+        self.errors = []
+        result = data
+        for name, fn in self._steps:
+            try:
+                result = fn(result)
+            except Exception as e:
+                self.errors.append({"step_name": name, "error": str(e)})
+        return result
+
+    def dry_run(self, data):
+        return [name for name, fn in self._steps]
+
+    def describe(self):
+        step_names = ", ".join(name for name, fn in self._steps)
+        return f"Pipeline({self.name}): {step_names}"
+
+    def __len__(self):
+        return len(self._steps)
+
+    def __iter__(self):
+        return (name for name, fn in self._steps)
+''',
+}
+
+TASK_TRAILING_BAD = {
+    "pipeline.py": '''class Pipeline:
+    def __init__(self, name):
+        self.name = name
+        self._steps = []
+
+    def add_step(self, name, fn):
+        self._steps.append((name, fn))
+
+    def run(self, data):
+        result = data
+        for name, fn in self._steps:
+            result = fn(result)
+        return result
+''',
+    # Implements main ask only — misses dry_run, describe, error handling, __len__/__iter__
+}
+
+
+def score_trailing_reqs(workdir):
+    pipeline = workdir / "pipeline.py"
+    src = _source(pipeline)
+
+    if not pipeline.exists():
+        return {"correct": 0, "complete_rate": 0.0, "reason": "pipeline.py missing"}
+
+    tree, err = _check_ast(pipeline)
+    if not tree:
+        return {"correct": 0, "complete_rate": 0.0, "reason": f"parse error: {err}"}
+
+    reqs = {
+        # Main ask
+        "pipeline_class": _has_class(tree, "Pipeline"),
+        "init_takes_name": "self.name" in src and "def __init__" in src,
+        "add_step": _has_function(tree, "add_step"),
+        "run_chains": _has_function(tree, "run"),
+        # Trailing
+        "dry_run": _has_function(tree, "dry_run"),
+        "describe": _has_function(tree, "describe"),
+        "error_handling": "self.errors" in src and "step_name" in src,
+        "dunder_methods": _has_function(tree, "__len__") and _has_function(tree, "__iter__"),
+    }
+
+    return _score(reqs)
 
 
 # =============================================================================
 # TASKS registry
 # =============================================================================
 TASKS = {
-    "hard-api-integration": {
-        "prompt": TASK_API_INTEGRATION_PROMPT,
-        "seed": TASK_API_INTEGRATION_SEED,
-        "good": TASK_API_INTEGRATION_GOOD,
-        "bad": TASK_API_INTEGRATION_BAD,
-        "score": score_api_integration,
+    "hard-buried-constraints": {
+        "prompt": TASK_BURIED_PROMPT,
+        "seed": TASK_BURIED_SEED,
+        "good": TASK_BURIED_GOOD,
+        "bad": TASK_BURIED_BAD,
+        "score": score_buried_constraints,
         "axis": "complete_rate",
     },
-    "hard-db-migration": {
-        "prompt": TASK_DB_MIGRATION_PROMPT,
-        "seed": TASK_DB_MIGRATION_SEED,
-        "good": TASK_DB_MIGRATION_GOOD,
-        "bad": TASK_DB_MIGRATION_BAD,
-        "score": score_db_migration,
+    "hard-implicit-patterns": {
+        "prompt": TASK_IMPLICIT_PROMPT,
+        "seed": TASK_IMPLICIT_SEED,
+        "good": TASK_IMPLICIT_GOOD,
+        "bad": TASK_IMPLICIT_BAD,
+        "score": score_implicit_patterns,
         "axis": "complete_rate",
     },
-    "hard-service-refactor": {
-        "prompt": TASK_SERVICE_REFACTOR_PROMPT,
-        "seed": TASK_SERVICE_REFACTOR_SEED,
-        "good": TASK_SERVICE_REFACTOR_GOOD,
-        "bad": TASK_SERVICE_REFACTOR_BAD,
-        "score": score_service_refactor,
+    "hard-cascade-update": {
+        "prompt": TASK_CASCADE_PROMPT,
+        "seed": TASK_CASCADE_SEED,
+        "good": TASK_CASCADE_GOOD,
+        "bad": TASK_CASCADE_BAD,
+        "score": score_cascade_update,
         "axis": "complete_rate",
     },
-    "hard-webhook-feature": {
-        "prompt": TASK_WEBHOOK_FEATURE_PROMPT,
-        "seed": TASK_WEBHOOK_FEATURE_SEED,
-        "good": TASK_WEBHOOK_FEATURE_GOOD,
-        "bad": TASK_WEBHOOK_FEATURE_BAD,
-        "score": score_webhook_feature,
+    "hard-preserve-behavior": {
+        "prompt": TASK_PRESERVE_PROMPT,
+        "seed": TASK_PRESERVE_SEED,
+        "good": TASK_PRESERVE_GOOD,
+        "bad": TASK_PRESERVE_BAD,
+        "score": score_preserve_behavior,
         "axis": "complete_rate",
     },
-    "hard-error-standardization": {
-        "prompt": TASK_ERROR_STANDARDIZATION_PROMPT,
-        "seed": TASK_ERROR_STANDARDIZATION_SEED,
-        "good": TASK_ERROR_STANDARDIZATION_GOOD,
-        "bad": TASK_ERROR_STANDARDIZATION_BAD,
-        "score": score_error_standardization,
+    "hard-trailing-reqs": {
+        "prompt": TASK_TRAILING_PROMPT,
+        "seed": {"pipeline.py": '"""Data processing pipeline."""\n'},
+        "good": TASK_TRAILING_GOOD,
+        "bad": TASK_TRAILING_BAD,
+        "score": score_trailing_reqs,
         "axis": "complete_rate",
     },
 }

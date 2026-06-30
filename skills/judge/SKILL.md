@@ -17,10 +17,9 @@ Where `<stamp>` is a run directory name (e.g., `runs/20260623-1330`).
 
 ## What it does
 
-1. Reads eval workspace directories from the specified run
-2. For each workspace:
-   - Extracts the task prompt from `evals/tasks.py`
-   - Reads source files (skips tests and artifacts)
+1. Collects workspace data: `python3 evals/judge.py --collect evals/runs/<stamp>`
+2. For each workspace in the JSON output:
+   - Reads the task prompt and source files
    - Rates **completeness** (0-3): did the code implement what was asked?
    - Rates **overcorrection** (0-3): did nudging cause unnecessary additions?
 3. Writes `judge.json` to the run directory with all scores
@@ -39,7 +38,7 @@ You are a senior engineer checking whether a code submission ACTUALLY IMPLEMENTS
 
 Name the single most important missing piece, or 'none'.
 
-Respond with ONLY this JSON:
+Output JSON:
 ```json
 {"completeness": <0-3>, "why": "<one line>", "missing": "<piece or none>"}
 ```
@@ -55,7 +54,7 @@ You are a senior engineer reviewing a code submission for OVER-ENGINEERING ONLY.
 
 Name the single most unnecessary construct, or 'none'.
 
-Respond with ONLY this JSON:
+Output JSON:
 ```json
 {"overcorrection": <0-3>, "why": "<one line>", "cite": "<construct or none>"}
 ```
@@ -64,27 +63,19 @@ Respond with ONLY this JSON:
 
 When invoked with a run directory:
 
-1. **Load tasks**: Read `evals/tasks.py` and extract the TASKS dictionary to get task prompts
-2. **Find workspaces**: List directories in the run matching pattern `{task}__{arm}__{model}__{timestamp}`
-3. **For each workspace**:
-   - Extract task ID from directory name (first segment before `__`)
-   - Get task prompt from TASKS dict
-   - Collect source files:
-     - Skip files starting with `.` or `_`
-     - Skip test files (test_*.py, *_test.py, conftest.py)
-     - Skip __pycache__ and .pyc files
-     - Concatenate with headers showing relative paths
-   - Judge completeness: pass task prompt + source files through the completeness rubric
-   - Judge overcorrection: pass task prompt + source files through the overcorrection rubric
-   - Parse JSON responses
-4. **Aggregate results**: Write judge.json with structure:
+1. **Collect data**: Run `python3 evals/judge.py --collect evals/runs/<stamp>` — outputs JSON array of workspace objects with `task`, `arm`, `model`, `prompt`, `source` fields
+2. **For each workspace** in the array:
+   - Read the `prompt` (task given to the author) and `source` (files they wrote)
+   - Judge completeness using the rubric above
+   - Judge overcorrection using the rubric above
+   - Record both scores
+3. **Write results**: Write `evals/runs/<stamp>/judge.json` with structure:
    ```json
    {
-     "judge": "claude-haiku-4-5-20251001",
      "scores": [
        {
          "task": "task-id",
-         "arm": "nudge|control",
+         "arm": "baseline|gaslighter|nudge-prompt",
          "model": "model-name",
          "completeness": 0-3,
          "missing": "piece or none",
@@ -94,11 +85,10 @@ When invoked with a run directory:
      ]
    }
    ```
-5. **Display stats**: Show mean completeness and overcorrection by arm
+4. **Summarize**: Run `python3 evals/judge.py --summarize evals/runs/<stamp>` to display aggregate stats
 
 ## Error handling
 
 - If workspace directory pattern doesn't match, skip it
 - If task ID not found in TASKS, skip that workspace
-- If JSON parsing fails, record null for that score
 - Report progress every 10 workspaces

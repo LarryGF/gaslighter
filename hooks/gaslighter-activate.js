@@ -1,64 +1,48 @@
 #!/usr/bin/env node
-// gaslighter — SessionStart activation hook
-//
-// 1. Writes flag file at $CLAUDE_CONFIG_DIR/.gaslighter-active
-// 2. Cleans stale session state files (>24h old)
-// 3. Emits gaslighter instructions as SessionStart context
-// 4. Detects missing statusline config and emits setup nudge
+// gaslighter v1.0 — SessionStart activation hook
 
-const fs = require('fs');
-const path = require('path');
-const { getDefaultMode, getClaudeDir, isShellSafe } = require('./gaslighter-config');
-const { getGaslighterInstructions } = require('./gaslighter-instructions');
-const { clearMode, setMode, writeHookOutput, cleanStaleState } = require('./gaslighter-runtime');
+var fs = require('fs');
+var path = require('path');
+var os = require('os');
 
-var claudeDir = getClaudeDir();
-var settingsPath = path.join(claudeDir, 'settings.json');
-var mode = getDefaultMode();
+var claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+var mode = (process.env.GASLIGHTER_DEFAULT_MODE || 'on').toLowerCase();
 
 if (mode === 'off') {
-  clearMode();
-  writeHookOutput('OK');
+  try { fs.unlinkSync(path.join(claudeDir, '.gaslighter-active')); } catch (e) {}
+  process.stdout.write('OK');
   process.exit(0);
 }
 
-try { setMode(mode); } catch (e) {}
+// Write flag file
+var flagPath = path.join(claudeDir, '.gaslighter-active');
+try { fs.mkdirSync(path.dirname(flagPath), { recursive: true }); } catch (e) {}
+fs.writeFileSync(flagPath, mode);
 
-cleanStaleState();
+// Emit framing prompt
+var output =
+  'You have a requirement completeness checker active. When you finish implementing ' +
+  'code changes, you\'ll be asked to verify you haven\'t missed anything. This is a ' +
+  'helpful self-review, not criticism. When prompted, genuinely re-examine the original ' +
+  'request rather than assuming you\'re done.';
 
-var output = getGaslighterInstructions(mode);
-
+// Statusline detection
 try {
+  var settingsPath = path.join(claudeDir, 'settings.json');
   var hasStatusline = false;
   if (fs.existsSync(settingsPath)) {
-    var raw = fs.readFileSync(settingsPath, 'utf8').replace(/^﻿/, '');
-    var settings = JSON.parse(raw);
+    var settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^﻿/, ''));
     if (settings.statusLine) hasStatusline = true;
   }
-
   if (!hasStatusline) {
-    var isWindows = process.platform === 'win32';
-    var scriptName = isWindows ? 'gaslighter-statusline.ps1' : 'gaslighter-statusline.sh';
+    var scriptName = process.platform === 'win32' ? 'gaslighter-statusline.ps1' : 'gaslighter-statusline.sh';
     var scriptPath = path.join(__dirname, scriptName);
-    if (isShellSafe(scriptPath)) {
-      var command = isWindows
-        ? 'powershell -ExecutionPolicy Bypass -File "' + scriptPath + '"'
-        : 'bash "' + scriptPath + '"';
-      var snippet = '"statusLine": { "type": "command", "command": ' + JSON.stringify(command) + ' }';
-      output += '\n\nSTATUSLINE SETUP NEEDED: The gaslighter plugin includes a statusline badge showing active mode ' +
-        '(e.g. [GASLIGHTER], [GASLIGHTER:ULTRA]). It is not configured yet. ' +
-        'To enable, add this to ~/.claude/settings.json: ' + snippet + ' ' +
-        'Proactively offer to set this up for the user on first interaction.';
-    } else {
-      output += '\n\nSTATUSLINE SETUP NEEDED: The gaslighter plugin includes a statusline badge showing active mode. ' +
-        'Its install path contains characters unsafe to embed in a shell command, so configure it manually: ' +
-        'add a statusLine command of type "command" that runs ' + scriptName +
-        ' from the plugin\'s hooks directory to ~/.claude/settings.json, quoting/escaping the path for your shell. ' +
-        'Proactively offer to set this up for the user on first interaction.';
-    }
+    var command = process.platform === 'win32'
+      ? 'powershell -ExecutionPolicy Bypass -File "' + scriptPath + '"'
+      : 'bash "' + scriptPath + '"';
+    var snippet = '"statusLine": { "type": "command", "command": ' + JSON.stringify(command) + ' }';
+    output += '\n\nSTATUSLINE SETUP NEEDED: Add this to ~/.claude/settings.json to show gaslighter mode badge: ' + snippet;
   }
 } catch (e) {}
 
-try {
-  writeHookOutput(output);
-} catch (e) {}
+process.stdout.write(output);
