@@ -34,12 +34,20 @@ If automated score is 1.0 and you're considering 0-1, re-examine the workspace. 
 
 ## Instructions
 
-You will receive a set of workspaces for a single task, each with its automated `complete_rate`. For each workspace:
+You will be pointed at a JSON file containing a set of workspaces for a single task, each with its automated `complete_rate`. It is pretty-printed (short lines) — one `Read` call with no offset/limit returns the whole file; there is no need to grep it or read it in pieces.
 
-1. Read the workspace source code to understand what was built
+For each workspace:
+
+1. Read the workspace source code (the `source` field) to understand what was built
 2. Compare against the task prompt to judge completeness
 3. Check for unnecessary abstractions/structure to judge overcorrection
 4. Return one score entry per workspace
 
+Score every workspace you were given, in one pass. Do not stop partway to re-litigate your own calibration, do not sample a subset and generalize, and never pad the output by duplicating or inventing entries to hit the expected count — an incomplete real answer is more useful than a fabricated complete one.
+
 For `missing`: name the single most important missing piece, or "none".
 For `cite`: name the single most unnecessary construct, or "none".
+
+## Output
+
+There is no `StructuredOutput` tool — do not attempt to call one. Your final answer must be ONLY a raw JSON object of the form `{"scores": [...]}`, one entry per workspace, with no prose before or after it and no markdown code fences.
