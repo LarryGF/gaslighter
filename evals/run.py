@@ -330,8 +330,10 @@ def rescore(run_dir):
         parts = ws.name.split("__")
         if len(parts) != 4 or parts[0] not in TASKS:
             continue
-        tid, arm, model, _r = parts
-        results.append(score_workspace(tid, arm, model, ws))
+        tid, arm, model, r = parts
+        res = score_workspace(tid, arm, model, ws)
+        res["run"] = int(r)
+        results.append(res)
     rows = aggregate(results)
     (run_dir / "results.json").write_text(
         json.dumps({"rescored": True, "results": results}, indent=2), encoding="utf-8")
@@ -425,6 +427,7 @@ def main():
                 res = fut.result()
             except Exception as e:
                 res = {"task": tid, "arm": arm, "model": model, "error": str(e)[:200]}
+            res["run"] = r
             results.append(res)
             done += 1
             print(f"  [{done}/{total}] {tid} / {arm} / {model} #{r}  "
