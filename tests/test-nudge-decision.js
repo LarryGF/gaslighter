@@ -119,5 +119,91 @@ test('full mode: exits 0 and emits block decision on stdout', function () {
   assert.strictEqual(result.stderr, '');
 });
 
+// --- confidenceDeclared ---
+
+test('confidenceDeclared: matches "100% certain"', function () {
+  assert.ok(nudge.confidenceDeclared('I am 100% certain that everything is covered.'));
+});
+
+test('confidenceDeclared: matches "100% confident"', function () {
+  assert.ok(nudge.confidenceDeclared('100% confident this is done.'));
+});
+
+test('confidenceDeclared: does not match plain confirmation', function () {
+  assert.ok(!nudge.confidenceDeclared('Confirmed: I have implemented exactly what was asked.'));
+});
+
+test('confidenceDeclared: does not match empty/undefined', function () {
+  assert.ok(!nudge.confidenceDeclared(''));
+  assert.ok(!nudge.confidenceDeclared(undefined));
+});
+
+// --- lastAssistantText ---
+
+function writeTranscript(entries) {
+  var p = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gs-transcript-')), 'transcript.jsonl');
+  fs.writeFileSync(p, entries.map(function (e) { return JSON.stringify(e); }).join('\n') + '\n');
+  return p;
+}
+
+test('lastAssistantText: returns text of most recent assistant turn', function () {
+  var p = writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'hi' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'first reply' }] } },
+    { type: 'user', message: { role: 'user', content: 'more' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I am 100% certain.' }] } }
+  ]);
+  assert.strictEqual(nudge.lastAssistantText(p), 'I am 100% certain.');
+});
+
+test('lastAssistantText: returns empty string for missing path', function () {
+  assert.strictEqual(nudge.lastAssistantText(undefined), '');
+  assert.strictEqual(nudge.lastAssistantText('/no/such/file.jsonl'), '');
+});
+
+// --- anti-loop: stops early once confidence is declared, without hitting the cap of 3 ---
+
+test('anti-loop: nudges again after a plain confirmation (no escape hatch used)', function () {
+  var sessionId = 'test-noconf-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var transcript = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } }
+  ]);
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  function fire() {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(); // nudge 1 (first, unconditional)
+  var second = fire(); // nudge 2: last assistant text has no confidence declaration -> nudges again
+  var out = JSON.parse(second.stdout);
+  assert.ok(out.hookSpecificOutput.additionalContext.includes('One more check'));
+});
+
+test('anti-loop: stops nudging as soon as the model declares 100% confidence, before hitting the cap of 3', function () {
+  var sessionId = 'test-conf-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  function fire(transcript) {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(writeTranscript([])); // nudge 1: forced regardless of transcript
+  fire(writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } }
+  ])); // nudge 2: still no confidence declared yet
+  var third = fire(writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I am 100% certain that everything is covered.' }] } }
+  ])); // nudge 3 would normally fire (count=2 < 3), but model already declared confidence -> should stay silent
+  assert.strictEqual(third.stdout, '');
+  assert.strictEqual(third.status, 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);
