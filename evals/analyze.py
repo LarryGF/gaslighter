@@ -24,7 +24,7 @@ def summary_stats(run_dir):
         print(f"  cost:          ${stats.get('cost_mean', 0):.3f}")
 
 def find_failures(run_dir, threshold=0.9):
-    """Find cells where gaslighter < threshold completion."""
+    """Find cells where a gaslighter-* arm scored below threshold completion."""
     results_path = Path(run_dir) / "results.json"
     if not results_path.exists():
         print(f"No results.json in {run_dir}")
@@ -33,11 +33,11 @@ def find_failures(run_dir, threshold=0.9):
     data = json.loads(results_path.read_text())
     failures = [
         r for r in data["results"]
-        if r.get("arm") == "gaslighter" and r.get("complete_rate", 0) < threshold
+        if r.get("arm", "").startswith("gaslighter") and r.get("complete_rate", 0) < threshold
     ]
 
     if not failures:
-        print(f"No gaslighter failures below {threshold}")
+        print(f"No gaslighter-* failures below {threshold}")
         return
 
     print(f"\n{'Task':30} {'Model':8} {'Complete':8} {'Correct':8}")
@@ -49,29 +49,29 @@ def find_failures(run_dir, threshold=0.9):
         corr = f.get("correct", 0)
         print(f"{task:30} {model:8} {comp:8.2f} {corr:8}")
 
-def compare_arms(run_dir, task_id, model):
-    """Compare baseline vs gaslighter for a specific task/model."""
+def compare_arms(run_dir, task_id, model, arm_a="baseline", arm_b="gaslighter-lite"):
+    """Compare two arms (default baseline vs gaslighter-lite) for a specific task/model."""
     results_path = Path(run_dir) / "results.json"
     if not results_path.exists():
         print(f"No results.json in {run_dir}")
         return
 
     data = json.loads(results_path.read_text())
-    baseline = [r for r in data["results"]
-                if r.get("task") == task_id and r.get("model") == model and r.get("arm") == "baseline"]
-    gaslighter = [r for r in data["results"]
-                  if r.get("task") == task_id and r.get("model") == model and r.get("arm") == "gaslighter"]
+    a = [r for r in data["results"]
+         if r.get("task") == task_id and r.get("model") == model and r.get("arm") == arm_a]
+    b = [r for r in data["results"]
+         if r.get("task") == task_id and r.get("model") == model and r.get("arm") == arm_b]
 
     print(f"\n{task_id} ({model})")
-    print(f"  Baseline:    {len(baseline)} runs, avg complete={sum(r.get('complete_rate',0) for r in baseline)/len(baseline):.2f}")
-    print(f"  Gaslighter:  {len(gaslighter)} runs, avg complete={sum(r.get('complete_rate',0) for r in gaslighter)/len(gaslighter):.2f}")
+    print(f"  {arm_a}:    {len(a)} runs, avg complete={sum(r.get('complete_rate',0) for r in a)/len(a):.2f}")
+    print(f"  {arm_b}:  {len(b)} runs, avg complete={sum(r.get('complete_rate',0) for r in b)/len(b):.2f}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage:")
         print("  python analyze.py summary <run_dir>")
         print("  python analyze.py failures <run_dir> [threshold]")
-        print("  python analyze.py compare <run_dir> <task_id> <model>")
+        print("  python analyze.py compare <run_dir> <task_id> <model> [arm_a] [arm_b]")
         sys.exit(1)
 
     cmd = sys.argv[1]
@@ -81,6 +81,7 @@ if __name__ == "__main__":
         threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 0.9
         find_failures(sys.argv[2], threshold)
     elif cmd == "compare":
-        compare_arms(sys.argv[2], sys.argv[3], sys.argv[4])
+        extra = sys.argv[5:7]
+        compare_arms(sys.argv[2], sys.argv[3], sys.argv[4], *extra)
     else:
         print(f"Unknown command: {cmd}")

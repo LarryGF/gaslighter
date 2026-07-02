@@ -11,6 +11,7 @@ not by direct API calls.
 import argparse
 import json
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -43,9 +44,12 @@ def collect(run_dir):
     run_dir = Path(run_dir)
     if not run_dir.exists():
         run_dir = RUNS_DIR / run_dir.name
+    ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    if not ws_dir.exists():
+        ws_dir = run_dir  # older runs kept workspaces alongside results.json
 
     workspaces = []
-    for ws in sorted(p for p in run_dir.iterdir() if p.is_dir()):
+    for ws in sorted(p for p in ws_dir.iterdir() if p.is_dir()):
         parts = ws.name.split("__")
         if len(parts) != 4 or parts[0] not in TASKS:
             continue

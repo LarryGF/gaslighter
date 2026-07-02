@@ -81,11 +81,12 @@ When invoked:
      * 4 runs × 1 model ≈ 20-30 min
      * 4 runs × 3 models ≈ 60-90 min
 
-6. **On completion**: Extract the run timestamp from the eval output, then automatically invoke the judge skill:
+6. **On completion**: Extract the run timestamp from the eval output, print the automated score summary, then chain into judging:
    ```
+   Bash({ command: "cd ~/Documents/GitHub/gaslighter/evals && python3 analyze.py summary runs/{timestamp}" })
    Skill({ skill: "gaslighter:judge", args: "runs/{timestamp}" })
    ```
-   Do NOT tell the user to run judge manually — always chain automatically.
+   `analyze.py summary` reads `summary.json` (complete_rate, correct_rate, turns, cost per task/arm/model) — free, no API spend — and gives the user a quick read before the judge skill spends tokens on LLM scoring. Do NOT tell the user to run judge manually — always chain automatically.
 
 ## Available Flags
 

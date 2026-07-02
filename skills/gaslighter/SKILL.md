@@ -7,24 +7,48 @@ allowed-tools:
   - Skill(gaslighter:eval)
   - Skill(gaslighter:judge)
   - AskUserQuestion()
-  - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/load.py *)
----
-
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/load.py" $ARGUMENTS`
-
-Execute the instructions above.
-
 ---
 
 # Gaslighter — Requirement Completeness Guard
 
 A Stop hook that asks you to verify you haven't missed anything before completing code changes. When nudged, genuinely re-read the original request — don't assume you're done.
 
-## Switching Modes
+## Routing
 
-- `GASLIGHTER_DEFAULT_MODE=on` (default) — active
-- `GASLIGHTER_DEFAULT_MODE=off` — disabled
-- `stop gaslighter` or `normal mode` in conversation — disable for session
+Route based on ARGUMENTS:
+
+- `eval`, `evals`, `benchmark` → `Skill({ skill: "gaslighter:eval", args: "{remaining args}" })`
+- `judge`, `score`, `rate` → `Skill({ skill: "gaslighter:judge", args: "{remaining args}" })`
+- `help` → show the Modes and How It Works sections below
+- anything else or empty → ask the user:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "What would you like to do?",
+    header: "Action",
+    multiSelect: false,
+    options: [
+      { label: "Run evals", description: "Run the gaslighter benchmark suite" },
+      { label: "Judge run", description: "Score a completed eval run for completeness and overcorrection" },
+      { label: "Help", description: "Show gaslighter usage and configuration" }
+    ]
+  }]
+})
+```
+
+Then route based on selection:
+- Run evals → `Skill({ skill: "gaslighter:eval" })`
+- Judge run → `Skill({ skill: "gaslighter:judge" })`
+- Help → show sections below
+
+## Modes
+
+Set `GASLIGHTER_MODE` env var:
+
+- `lite` (default) — exit 1, soft nudge suggests re-examination
+- `full` — exit 2, hard block forces re-examination
+- `off` — disabled, hook exits silently
 
 ## How It Works
 

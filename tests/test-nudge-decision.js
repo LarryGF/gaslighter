@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Unit tests for gaslighter v1.0 nudge logic
+// Unit tests for gaslighter nudge logic
 
 var assert = require('assert');
 var fs = require('fs');
 var path = require('path');
 var os = require('os');
+var spawnSync = require('child_process').spawnSync;
 
 var passed = 0;
 var failed = 0;
@@ -20,75 +21,27 @@ function test(name, fn) {
   }
 }
 
-// --- usedWriteOrEdit ---
-
-function tmpTranscript(lines) {
-  var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gaslighter-test-'));
-  var p = path.join(dir, 'transcript.jsonl');
-  fs.writeFileSync(p, lines.map(function (l) { return JSON.stringify(l); }).join('\n'));
-  return p;
-}
-
 var nudge = require('../hooks/gaslighter-nudge');
 
-test('usedWriteOrEdit: true when Edit tool used', function () {
-  var p = tmpTranscript([
-    { type: 'user', message: { content: 'fix the bug' } },
-    { type: 'assistant', message: { content: [
-      { type: 'tool_use', name: 'Edit', input: { file_path: 'foo.js' } }
-    ] } }
-  ]);
-  assert.strictEqual(nudge.usedWriteOrEdit(p), true);
+// --- getMode ---
+
+test('getMode: defaults to lite when env not set', function () {
+  var orig = process.env.GASLIGHTER_MODE;
+  delete process.env.GASLIGHTER_MODE;
+  assert.strictEqual(nudge.getMode(), 'lite');
+  if (orig !== undefined) process.env.GASLIGHTER_MODE = orig;
 });
 
-test('usedWriteOrEdit: true when Write tool used', function () {
-  var p = tmpTranscript([
-    { type: 'user', message: { content: 'create file' } },
-    { type: 'assistant', message: { content: [
-      { type: 'tool_use', name: 'Write', input: { file_path: 'bar.js' } }
-    ] } }
-  ]);
-  assert.strictEqual(nudge.usedWriteOrEdit(p), true);
-});
-
-test('usedWriteOrEdit: false when only Read tools used', function () {
-  var p = tmpTranscript([
-    { type: 'user', message: { content: 'explain code' } },
-    { type: 'assistant', message: { content: [
-      { type: 'tool_use', name: 'Read', input: { file_path: 'foo.js' } },
-      { type: 'text', text: 'Here is the explanation.' }
-    ] } }
-  ]);
-  assert.strictEqual(nudge.usedWriteOrEdit(p), false);
-});
-
-test('usedWriteOrEdit: false on pure text response', function () {
-  var p = tmpTranscript([
-    { type: 'user', message: { content: 'hello' } },
-    { type: 'assistant', message: { content: [
-      { type: 'text', text: 'Hi there!' }
-    ] } }
-  ]);
-  assert.strictEqual(nudge.usedWriteOrEdit(p), false);
-});
-
-test('usedWriteOrEdit: false on null/missing path', function () {
-  assert.strictEqual(nudge.usedWriteOrEdit(null), false);
-  assert.strictEqual(nudge.usedWriteOrEdit(''), false);
-});
-
-test('usedWriteOrEdit: only checks last assistant turn', function () {
-  var p = tmpTranscript([
-    { type: 'user', message: { content: 'first' } },
-    { type: 'assistant', message: { content: [
-      { type: 'tool_use', name: 'Write', input: { file_path: 'old.js' } }
-    ] } },
-    { type: 'user', message: { content: 'second' } },
-    { type: 'assistant', message: { content: [
-      { type: 'text', text: 'Just chatting now.' }
-    ] } }
-  ]);
-  assert.strictEqual(nudge.usedWriteOrEdit(p), false);
+test('getMode: reads GASLIGHTER_MODE env var', function () {
+  var orig = process.env.GASLIGHTER_MODE;
+  process.env.GASLIGHTER_MODE = 'lite';
+  assert.strictEqual(nudge.getMode(), 'lite');
+  process.env.GASLIGHTER_MODE = 'off';
+  assert.strictEqual(nudge.getMode(), 'off');
+  process.env.GASLIGHTER_MODE = 'FULL';
+  assert.strictEqual(nudge.getMode(), 'full');
+  if (orig !== undefined) process.env.GASLIGHTER_MODE = orig;
+  else delete process.env.GASLIGHTER_MODE;
 });
 
 // --- nudge text variants ---
@@ -114,7 +67,7 @@ test('loadState returns defaults on missing file', function () {
   process.env.CLAUDE_SESSION_ID = 'test-missing-' + Date.now();
   var state = nudge.loadState();
   assert.strictEqual(state.nudge_count, 0);
-  assert.strictEqual(state.last_nudge_turn, -1);
+  assert.strictEqual(state.turn_count, 0);
   process.env.CLAUDE_PLUGIN_DATA = origData;
   process.env.CLAUDE_SESSION_ID = origSession;
 });
@@ -124,13 +77,46 @@ test('saveState + loadState round-trips', function () {
   var origSession = process.env.CLAUDE_SESSION_ID;
   process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
   process.env.CLAUDE_SESSION_ID = 'test-roundtrip-' + Date.now();
-  var s = { nudge_count: 2, turn_count: 5, last_nudge_turn: 4 };
+  var s = { nudge_count: 2, turn_count: 5 };
   nudge.saveState(s);
   var loaded = nudge.loadState();
   assert.strictEqual(loaded.nudge_count, 2);
-  assert.strictEqual(loaded.last_nudge_turn, 4);
+  assert.strictEqual(loaded.turn_count, 5);
   process.env.CLAUDE_PLUGIN_DATA = origData;
   process.env.CLAUDE_SESSION_ID = origSession;
+});
+
+// --- delivery protocol (stdout + exit 0) ---
+
+function runHook(mode, sessionId) {
+  var env = Object.assign({}, process.env, {
+    GASLIGHTER_MODE: mode,
+    CLAUDE_PLUGIN_DATA: fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-')),
+    CLAUDE_SESSION_ID: sessionId
+  });
+  return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+    input: JSON.stringify({ session_id: sessionId }),
+    env: env,
+    encoding: 'utf8'
+  });
+}
+
+test('lite mode: exits 0 and emits additionalContext on stdout', function () {
+  var result = runHook('lite', 'test-lite-' + Date.now());
+  assert.strictEqual(result.status, 0);
+  var out = JSON.parse(result.stdout);
+  assert.strictEqual(out.hookSpecificOutput.hookEventName, 'Stop');
+  assert.ok(out.hookSpecificOutput.additionalContext.includes('absolutely sure'));
+  assert.strictEqual(result.stderr, '');
+});
+
+test('full mode: exits 0 and emits block decision on stdout', function () {
+  var result = runHook('full', 'test-full-' + Date.now());
+  assert.strictEqual(result.status, 0);
+  var out = JSON.parse(result.stdout);
+  assert.strictEqual(out.decision, 'block');
+  assert.ok(out.reason.includes('absolutely sure'));
+  assert.strictEqual(result.stderr, '');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

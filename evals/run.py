@@ -40,7 +40,9 @@ NUDGE_PROMPT = (
 
 ARMS = {
     "baseline": lambda: None,
-    "gaslighter": lambda: None,
+    "gaslighter-off": lambda: None,
+    "gaslighter-lite": lambda: None,
+    "gaslighter-full": lambda: None,
     "nudge-prompt": lambda: NUDGE_PROMPT,
 }
 
@@ -66,14 +68,13 @@ def _plugin_dir():
     env = os.environ.get("GASLIGHTER_PLUGIN_DIR")
     if env:
         return env
+    if (ROOT / ".claude-plugin" / "plugin.json").exists():
+        return str(ROOT)
     base = PLUGIN_CACHE / "gaslighter" / "gaslighter"
     versions = sorted(p for p in base.glob("*") if p.is_dir()) if base.exists() else []
-    if not versions:
-        # Fall back to the repo root itself
-        if (ROOT / ".claude-plugin" / "plugin.json").exists():
-            return str(ROOT)
-        sys.exit(f"gaslighter plugin dir not found under {base}; set GASLIGHTER_PLUGIN_DIR")
-    return str(versions[-1])
+    if versions:
+        return str(versions[-1])
+    sys.exit("gaslighter plugin not found; run from the repo root or set GASLIGHTER_PLUGIN_DIR")
 
 
 def _is_test(p, workdir):
@@ -114,8 +115,36 @@ def code_stats(workdir):
     }
 
 
+def check_plugin():
+    failures = 0
+    hook = Path(_plugin_dir()) / "hooks" / "gaslighter-nudge.js"
+    if not hook.exists():
+        print(f"XX  hook script not found: {hook}")
+        return 1
+    data_dir = Path.home() / ".claude" / "plugins" / "data" / "gaslighter"
+    # lite delivers a non-blocking nudge via additionalContext, full hard-blocks via
+    # decision:block, both on stdout + exit 0 (stderr/exit-code protocol is broken, see docs)
+    checks = {
+        "lite": lambda out: '"additionalContext"' in out and '"decision"' not in out,
+        "full": lambda out: '"decision":"block"' in out.replace(" ", ""),
+        "off": lambda out: out.strip() == "",
+    }
+    for mode, check in checks.items():
+        sid = f"selftest-plugin-{mode}"
+        state_path = data_dir / f"state-{sid}.json"
+        state_path.unlink(missing_ok=True)
+        env = {**os.environ, "GASLIGHTER_MODE": mode, "CLAUDE_SESSION_ID": sid}
+        r = subprocess.run(["node", str(hook)], input="{}", capture_output=True, text=True, env=env)
+        ok = check(r.stdout) and r.returncode == 0
+        print(f"{'ok ' if ok else 'XX '} hook mode={mode:<4} exit={r.returncode} stdout={r.stdout[:80]!r}")
+        failures += 0 if ok else 1
+        state_path.unlink(missing_ok=True)
+    return failures
+
+
 def selftest():
     failures = 0
+    failures += check_plugin()
     for tid, task in TASKS.items():
         axis = task.get("axis", "complete_rate")
         for kind in ("good", "bad"):
@@ -145,22 +174,50 @@ def selftest():
     return failures
 
 
+def _check_hook_fired(arm, session_id):
+    """Verify gaslighter hook actually fired. Returns (nudge_count, state_dict) or (0, None)."""
+    if not arm.startswith("gaslighter-") or arm == "gaslighter-off":
+        return 0, None
+    if not session_id:
+        return 0, None
+    # lkb: --plugin-dir loads plugins as "session-only" and Claude Code suffixes
+    # their CLAUDE_PLUGIN_DATA dir with "-inline" (verified via --debug hooks),
+    # unlike the plain "gaslighter" dir used by a directly-invoked hook script.
+    data_dir = Path.home() / ".claude" / "plugins" / "data" / "gaslighter-inline"
+    state_path = data_dir / f"state-{session_id}.json"
+    if not state_path.exists():
+        return 0, None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        return state.get("nudge_count", 0), state
+    except Exception:
+        return 0, None
+
+
 def score_workspace(task_id, arm, model, workdir):
     meta = {}
     cj = workdir / "_claude.json"
+    session_id = None
     if cj.exists():
         try:
             j = json.loads(cj.read_text(encoding="utf-8"))
             u = j.get("usage") or {}
+            session_id = j.get("session_id")
             meta = {
                 "cost": j.get("total_cost_usd"),
                 "duration_ms": j.get("duration_ms"),
                 "turns": j.get("num_turns"),
                 "out_tokens": u.get("output_tokens"),
                 "in_tokens": u.get("input_tokens"),
+                "session_id": session_id,
             }
         except Exception:
             pass
+    nudge_count, _ = _check_hook_fired(arm, session_id)
+    meta["hook_fired"] = nudge_count > 0
+    meta["nudge_count"] = nudge_count
+    if arm in ("gaslighter-lite", "gaslighter-full") and nudge_count == 0:
+        print(f"  !! HOOK DID NOT FIRE: {task_id}/{arm}/{model} session={session_id}", flush=True)
     stats = code_stats(workdir)
     sc = TASKS[task_id]["score"](workdir)
     return {"task": task_id, "arm": arm, "model": model, **sc, **stats, **meta}
@@ -177,12 +234,16 @@ def run_cell(task_id, arm, model, workdir, timeout=CELL_TIMEOUT):
     if not claude:
         sys.exit("claude CLI not found on PATH")
 
-    cmd = [claude, "--bare", "-p", task["prompt"], "--model", MODELS[model],
+    cmd = [claude, "-p", task["prompt"], "--model", MODELS[model],
            "--permission-mode", "bypassPermissions", "--output-format", "json"]
 
     append = NO_RUN
-    if arm == "gaslighter":
+    env = os.environ.copy()
+    env["GASLIGHTER_DEBUG"] = "1"
+    if arm.startswith("gaslighter-"):
         cmd += ["--plugin-dir", _plugin_dir()]
+        gaslighter_mode = arm.split("-", 1)[1]  # off, lite, full
+        env["GASLIGHTER_MODE"] = gaslighter_mode
     elif arm == "nudge-prompt":
         append = NUDGE_PROMPT + "\n\n" + NO_RUN
     cmd += ["--append-system-prompt", append]
@@ -191,7 +252,7 @@ def run_cell(task_id, arm, model, workdir, timeout=CELL_TIMEOUT):
     err_path = workdir / "_claude.stderr.txt"
     try:
         with open(out_path, "wb") as so, open(err_path, "wb") as se:
-            proc = subprocess.Popen(cmd, cwd=str(workdir), stdout=so, stderr=se)
+            proc = subprocess.Popen(cmd, cwd=str(workdir), stdout=so, stderr=se, env=env)
             try:
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -218,7 +279,9 @@ def aggregate(results):
     for (t, a, m), cells in sorted(groups.items()):
         n = len(cells)
         costs = [c["cost"] for c in cells if c.get("cost") is not None]
-        rows.append({
+        hook_fired_count = sum(1 for c in cells if c.get("hook_fired"))
+        nudge_counts = [c.get("nudge_count", 0) for c in cells]
+        row = {
             "task": t, "arm": a, "model": m, "n": n,
             "correct_rate": round(sum(c.get("correct", 0) for c in cells) / n, 3),
             "complete_rate_mean": round(sum(c.get("complete_rate", 0) for c in cells) / n, 3),
@@ -226,7 +289,11 @@ def aggregate(results):
             "cost_mean": round(statistics.mean(costs), 4) if costs else None,
             "turns_mean": round(statistics.mean([c["turns"] for c in cells if c.get("turns")]), 1)
                 if any(c.get("turns") for c in cells) else None,
-        })
+        }
+        if a.startswith("gaslighter-") and a != "gaslighter-off":
+            row["hook_fired_rate"] = round(hook_fired_count / n, 3)
+            row["nudge_mean"] = round(statistics.mean(nudge_counts), 2)
+        rows.append(row)
     return rows
 
 
@@ -255,8 +322,11 @@ def rescore(run_dir):
     run_dir = Path(run_dir)
     if not run_dir.exists():
         run_dir = RUNS_DIR / run_dir.name
+    ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    if not ws_dir.exists():
+        ws_dir = run_dir  # older runs kept workspaces alongside results.json
     results = []
-    for ws in sorted(p for p in run_dir.iterdir() if p.is_dir()):
+    for ws in sorted(p for p in ws_dir.iterdir() if p.is_dir()):
         parts = ws.name.split("__")
         if len(parts) != 4 or parts[0] not in TASKS:
             continue
@@ -332,6 +402,8 @@ def main():
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = RUNS_DIR / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
+    workspace_root = Path(tempfile.gettempdir()) / "gaslighter-evals" / stamp
+    workspace_root.mkdir(parents=True, exist_ok=True)
 
     cells = [(tid, arm, model, r)
              for tid in task_ids for model in models for arm in arms for r in range(runs)]
@@ -340,7 +412,7 @@ def main():
 
     def _one(spec):
         tid, arm, model, r = spec
-        ws = out_dir / f"{tid}__{arm}__{model}__{r}"
+        ws = workspace_root / f"{tid}__{arm}__{model}__{r}"
         ws.mkdir(parents=True, exist_ok=True)
         return run_cell(tid, arm, model, ws, timeout=timeout)
 
