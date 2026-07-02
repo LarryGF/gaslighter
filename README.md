@@ -51,14 +51,14 @@ See `evals/README.md` for task details and judging.
 
 ## Results
 
-Latest eval run (160 cells: 2 tasks × 5 arms × 2 models × 8 runs):
+Merged across two eval runs (310 cells total: 5 tasks × 5 arms × 2 models, 8 runs/cell on the original 2 tasks + 3 runs/cell across all 5 tasks):
 
 | Arm | Correct | Auto Complete | Judge Completeness | Judge Overcorrection |
 |---|---|---|---|---|
-| baseline | 0.906 | 0.881 | 2.34 | 0.72 |
-| gaslighter-off | 0.906 | 0.877 | 2.12 | 0.34 |
-| gaslighter-lite | 0.969 | 0.908 | 2.22 | 0.31 |
-| gaslighter-full | 0.969 | 0.908 | 2.47 | 0.34 |
-| nudge-prompt | 0.875 | 0.866 | 2.16 | 0.44 |
+| baseline | 0.887 | 0.893 | 2.42 | 0.48 |
+| gaslighter-off | 0.935 | 0.915 | 2.39 | 0.31 |
+| gaslighter-lite | 0.952 | 0.929 | 2.42 | 0.40 |
+| gaslighter-full | 0.984 | 0.945 | 2.60 | 0.31 |
+| nudge-prompt | 0.903 | 0.891 | 2.37 | 0.35 |
 
-Both `gaslighter-lite` and `gaslighter-full` beat baseline on correctness/completion and cut overcorrection by more than half, at the cost of extra turns. Full findings and all 160 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).
+`gaslighter-full` leads on every quality metric — correctness, completion, and judged completeness — with overcorrection at or below baseline, at the cost of roughly 50% more turns. Full findings and all 310 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).

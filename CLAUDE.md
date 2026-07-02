@@ -4,7 +4,7 @@ Claude Code plugin that uses a Stop hook to nudge Claude into verifying requirem
 
 ## How It Works
 
-When Claude uses Write or Edit tools, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: max 3 nudges per session. First nudge forces re-examination; subsequent nudges give an escape hatch.
+When Claude uses Write or Edit tools, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: max 3 nudges per session. First nudge forces re-examination; subsequent nudges give an escape hatch — if the model's last turn (read from `transcript_path`) already declares "100% certain/confident/sure", the hook stops nudging immediately instead of counting up to 3 regardless of what was said.
 
 ## Modes
 

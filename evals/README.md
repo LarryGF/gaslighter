@@ -44,14 +44,14 @@ Collects workspace data via `judge.py --collect`, then rates each workspace on c
 
 ## Results
 
-Latest run (`20260701-175238`, 2 tasks × 5 arms × 2 models × 8 runs = 160 cells). Full breakdown, per-task tables, and all 160 individual run scores: [`docs/eval-findings.md`](../docs/eval-findings.md).
+Merged across `20260701-175238` (2 tasks × 5 arms × 2 models × 8 runs) and `20260702-131009` (5 tasks × 5 arms × 2 models × 3 runs) — 310 cells total. Full breakdown, per-task tables, and the full per-run appendix (tagged by source run): [`docs/eval-findings.md`](../docs/eval-findings.md).
 
 | Arm | Correct | Auto Complete | Judge Completeness | Judge Overcorrection | Turns | Cost/run |
 |---|---|---|---|---|---|---|
-| baseline | 0.906 | 0.881 | 2.34 | 0.72 | 10.6 | $0.1281 |
-| gaslighter-off | 0.906 | 0.877 | 2.12 | 0.34 | 10.4 | $0.1263 |
-| gaslighter-lite | 0.969 | 0.908 | 2.22 | 0.31 | 11.5 | $0.1829 |
-| gaslighter-full | 0.969 | 0.908 | 2.47 | 0.34 | 14.6 | $0.1977 |
-| nudge-prompt | 0.875 | 0.866 | 2.16 | 0.44 | 10.6 | $0.1181 |
+| baseline | 0.887 | 0.893 | 2.42 | 0.48 | 8.8 | $0.1178 |
+| gaslighter-off | 0.935 | 0.915 | 2.39 | 0.31 | 9.0 | $0.1181 |
+| gaslighter-lite | 0.952 | 0.929 | 2.42 | 0.40 | 9.7 | $0.1672 |
+| gaslighter-full | 0.984 | 0.945 | 2.60 | 0.31 | 13.2 | $0.1839 |
+| nudge-prompt | 0.903 | 0.891 | 2.37 | 0.35 | 8.8 | $0.1103 |
 
-Both active gaslighter modes beat baseline on automated correctness/completion and show markedly lower overcorrection, at the cost of extra turns (`full` especially). The static `nudge-prompt` arm underperforms baseline on automated correctness.
+`gaslighter-full` beats baseline on every quality metric (correctness, completion, judged completeness) while matching its overcorrection, at a ~50% turn/cost premium. The static `nudge-prompt` arm underperforms both active gaslighter modes on correctness.
