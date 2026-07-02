@@ -34,6 +34,12 @@ process.stdin.on('end', function () {
 
     var isFirst = (state.nudge_count || 0) === 0;
 
+    if (!isFirst && confidenceDeclared(lastAssistantText(payload.transcript_path))) {
+      debugLog('exit_confidence_declared', { nudge_count: state.nudge_count, session: sessionId });
+      saveState(state, sessionId);
+      process.exit(0);
+    }
+
     state.nudge_count = (state.nudge_count || 0) + 1;
     saveState(state, sessionId);
 
@@ -68,6 +74,37 @@ function getMode() {
   return (process.env.GASLIGHTER_MODE || 'lite').toLowerCase();
 }
 
+var CONFIDENCE_RE = /\b100%\s*(certain|confident|sure)\b/i;
+
+function confidenceDeclared(text) {
+  return CONFIDENCE_RE.test(text || '');
+}
+
+// Reads the last assistant turn's text from the Stop hook's transcript_path,
+// so we can tell whether the model already used the escape hatch offered by
+// SUBSEQUENT_NUDGE before firing another nudge.
+function lastAssistantText(transcriptPath) {
+  if (!transcriptPath) return '';
+  try {
+    var lines = fs.readFileSync(transcriptPath, 'utf8').split('\n');
+    for (var i = lines.length - 1; i >= 0; i--) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      var entry;
+      try { entry = JSON.parse(line); } catch (e) { continue; }
+      if (entry.type === 'assistant' && entry.message && entry.message.content) {
+        var content = entry.message.content;
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+          return content.filter(function (c) { return c && c.type === 'text'; })
+            .map(function (c) { return c.text; }).join('\n');
+        }
+      }
+    }
+  } catch (e) {}
+  return '';
+}
+
 
 function getStatePath(sessionId) {
   var dataDir = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data', 'gaslighter');
@@ -92,5 +129,5 @@ function saveState(state, sessionId) {
 
 // Exported for testing
 if (typeof module !== 'undefined') {
-  module.exports = { getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE };
+  module.exports = { getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText };
 }
