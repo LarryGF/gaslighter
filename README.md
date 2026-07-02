@@ -51,14 +51,14 @@ See `evals/README.md` for task details and judging.
 
 ## Results
 
-Merged across two eval runs (310 cells total: 5 tasks × 5 arms × 2 models, 8 runs/cell on the original 2 tasks + 3 runs/cell across all 5 tasks):
+Merged across three eval runs (460 cells total: 5 tasks × 5 arms × 2 models, 8 runs/cell on the original 2 tasks + 3 runs/cell each on two later full-suite runs):
 
 | Arm | Correct | Auto Complete | Judge Completeness | Judge Overcorrection |
 |---|---|---|---|---|
-| baseline | 0.887 | 0.893 | 2.42 | 0.48 |
-| gaslighter-off | 0.935 | 0.915 | 2.39 | 0.31 |
-| gaslighter-lite | 0.952 | 0.929 | 2.42 | 0.40 |
-| gaslighter-full | 0.984 | 0.945 | 2.60 | 0.31 |
-| nudge-prompt | 0.903 | 0.891 | 2.37 | 0.35 |
+| baseline | 0.902 | 0.902 | 2.50 | 0.34 |
+| gaslighter-off | 0.946 | 0.925 | 2.51 | 0.24 |
+| gaslighter-lite | 0.967 | 0.942 | 2.54 | 0.35 |
+| gaslighter-full | 0.978 | 0.952 | 2.64 | 0.33 |
+| nudge-prompt | 0.924 | 0.913 | 2.48 | 0.26 |
 
-`gaslighter-full` leads on every quality metric — correctness, completion, and judged completeness — with overcorrection at or below baseline, at the cost of roughly 50% more turns. Full findings and all 310 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).
+`gaslighter-full` leads on every quality metric — correctness, completion, and judged completeness — at the cost of roughly 47% more turns than baseline. The third run's hook code was edited mid-run to fix an anti-loop race condition, so its turn/cost figures are a mix of pre- and post-fix behavior — see the hook-version note in the findings doc. Full findings and all 460 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).

@@ -44,14 +44,14 @@ Collects workspace data via `judge.py --collect`, then rates each workspace on c
 
 ## Results
 
-Merged across `20260701-175238` (2 tasks × 5 arms × 2 models × 8 runs) and `20260702-131009` (5 tasks × 5 arms × 2 models × 3 runs) — 310 cells total. Full breakdown, per-task tables, and the full per-run appendix (tagged by source run): [`docs/eval-findings.md`](../docs/eval-findings.md).
+Merged across `20260701-175238` (2 tasks × 5 arms × 2 models × 8 runs), `20260702-131009` (5 tasks × 5 arms × 2 models × 3 runs), and `20260702-160751` (5 tasks × 5 arms × 2 models × 3 runs) — 460 cells total. Full breakdown, per-task tables, and the full per-run appendix (tagged by source run): [`docs/eval-findings.md`](../docs/eval-findings.md).
 
 | Arm | Correct | Auto Complete | Judge Completeness | Judge Overcorrection | Turns | Cost/run |
 |---|---|---|---|---|---|---|
-| baseline | 0.887 | 0.893 | 2.42 | 0.48 | 8.8 | $0.1178 |
-| gaslighter-off | 0.935 | 0.915 | 2.39 | 0.31 | 9.0 | $0.1181 |
-| gaslighter-lite | 0.952 | 0.929 | 2.42 | 0.40 | 9.7 | $0.1672 |
-| gaslighter-full | 0.984 | 0.945 | 2.60 | 0.31 | 13.2 | $0.1839 |
-| nudge-prompt | 0.903 | 0.891 | 2.37 | 0.35 | 8.8 | $0.1103 |
+| baseline | 0.902 | 0.902 | 2.50 | 0.34 | 8.4 | $0.1141 |
+| gaslighter-off | 0.946 | 0.925 | 2.51 | 0.24 | 8.4 | $0.1155 |
+| gaslighter-lite | 0.967 | 0.942 | 2.54 | 0.35 | 9.1 | $0.1621 |
+| gaslighter-full | 0.978 | 0.952 | 2.64 | 0.33 | 12.3 | $0.1740 |
+| nudge-prompt | 0.924 | 0.913 | 2.48 | 0.26 | 8.4 | $0.1075 |
 
-`gaslighter-full` beats baseline on every quality metric (correctness, completion, judged completeness) while matching its overcorrection, at a ~50% turn/cost premium. The static `nudge-prompt` arm underperforms both active gaslighter modes on correctness.
+`gaslighter-full` beats baseline on every quality metric (correctness, completion, judged completeness), at a ~47% turn/cost premium — down from the earlier two-run merge's ~50%, though the `20260702-160751` run's hook code was edited mid-run (an anti-loop race-condition fix), so its turn/cost figures mix pre- and post-fix behavior rather than cleanly isolating the fix's effect. The static `nudge-prompt` arm still underperforms both active gaslighter modes on correctness.

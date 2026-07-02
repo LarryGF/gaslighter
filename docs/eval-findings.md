@@ -1,10 +1,11 @@
 # Gaslighter Eval Findings
 
-Merged across two runs:
+Merged across three runs:
 - `evals/runs/20260701-175238` — 2 tasks × 5 arms × 2 models × 8 runs = 160 cells
 - `evals/runs/20260702-131009` — 5 tasks × 5 arms × 2 models × 3 runs = 150 cells
+- `evals/runs/20260702-160751` — 5 tasks × 5 arms × 2 models × 3 runs = 150 cells
 
-Combined: 310 cells. The two runs overlap on `hard-buried-constraints` and `hard-cascade-update` (now n=22/arm each, both runs pooled); `hard-implicit-patterns`, `hard-preserve-behavior`, and `hard-trailing-reqs` come only from the second run (n=6/arm each).
+Combined: 460 cells. `hard-buried-constraints` and `hard-cascade-update` are covered by all three runs (n=28/arm each, pooled); `hard-implicit-patterns`, `hard-preserve-behavior`, and `hard-trailing-reqs` come from the second and third runs only (n=12/arm each).
 
 ## Setup
 
@@ -25,72 +26,69 @@ Combined: 310 cells. The two runs overlap on `hard-buried-constraints` and `hard
   - *Automated*: deterministic code checks per task (`correct` = binary pass/fail, `complete_rate` = fraction of required checks passing)
   - *LLM judge*: an independent agent read each workspace's actual source and rated **completeness** (0-3, does it implement what was asked) and **overcorrection** (0-3, does it add unrequested structure/complexity)
 
-**Note on hook version:** the second run (`20260702-131009`) finished before the Stop-hook's anti-loop guard was fixed to stop nudging as soon as the model declares 100% confidence, instead of always counting to a fixed cap of 3 (see `CLAUDE.md`). Both runs in this merged table reflect the pre-fix hook behavior. A future run post-fix would be expected to show a similar completeness/correctness profile for `gaslighter-full`/`gaslighter-lite` at a lower turn/cost premium, since the fix specifically removes redundant nudges once the model has already re-verified.
+**Note on hook version:** `evals/runs/20260702-131009` finished before the Stop-hook's anti-loop guard was fixed to stop nudging as soon as the model declares 100% confidence, instead of always counting to a fixed cap of 3. `evals/runs/20260702-160751` was launched before that fix, but the fix (adding `readStable()` to `hooks/gaslighter-nudge.js` to close a transcript-read race that was defeating the confidence escape hatch) landed on disk while this third run's 150 cells were still executing in the background — each cell spawns the hook script fresh, so early cells in this run may have used the pre-fix hook while later cells used the post-fix version. This run's `gaslighter-full`/`gaslighter-lite` turn and cost figures should be read as a mix of both hook versions, not a clean post-fix sample. Directionally, the pooled `gaslighter-full` turns/cost (12.35 / $0.1740) did drop versus the pre-fix-only pooled figure (13.2 / $0.1839), consistent with the fix reducing redundant nudges, but a dedicated clean post-fix run is needed to isolate the effect.
 
-**Note on sample size:** the two runs use different run-counts per cell (8 vs 3), so per-task n varies (22 for the two overlapping tasks, 6 for the three new-only tasks). Treat single-cell and per-task numbers as directional, especially for the n=6 tasks.
+**Note on sample size:** run counts per cell vary across runs (8 for the first, 3 each for the second and third), so per-task n varies (28 for the two tasks in all three runs, 12 for the three tasks only in the second and third). Treat single-cell and per-task numbers as directional, especially for the n=12 tasks.
 
-## Headline result (merged, n=62 per arm — all 5 tasks, both models, both runs)
+## Headline result (merged, n=92 per arm — all 5 tasks, both models, all three runs)
 
 | Arm | n | Correct | Auto Complete | Judge Completeness | Judge Overcorrection | Turns | Cost/run |
 |---|---|---|---|---|---|---|---|
-| baseline | 62 | 0.887 | 0.893 | 2.42 | 0.48 | 8.8 | $0.1178 |
-| gaslighter-off | 62 | 0.935 | 0.915 | 2.39 | 0.31 | 9.0 | $0.1181 |
-| gaslighter-lite | 62 | 0.952 | 0.929 | 2.42 | 0.40 | 9.7 | $0.1672 |
-| gaslighter-full | 62 | 0.984 | 0.945 | 2.60 | 0.31 | 13.2 | $0.1839 |
-| nudge-prompt | 62 | 0.903 | 0.891 | 2.37 | 0.35 | 8.8 | $0.1103 |
+| baseline | 92 | 0.902 | 0.902 | 2.50 | 0.34 | 8.4 | $0.1141 |
+| gaslighter-off | 92 | 0.946 | 0.925 | 2.51 | 0.24 | 8.4 | $0.1155 |
+| gaslighter-lite | 92 | 0.967 | 0.942 | 2.54 | 0.35 | 9.1 | $0.1621 |
+| gaslighter-full | 92 | 0.978 | 0.952 | 2.64 | 0.33 | 12.3 | $0.1740 |
+| nudge-prompt | 92 | 0.924 | 0.913 | 2.48 | 0.26 | 8.4 | $0.1075 |
 
 ## Key findings
 
-1. **`gaslighter-full` leads on every automated and judge quality metric.** Highest correct (0.984), highest auto-complete (0.945), highest judge completeness (2.60), and its overcorrection (0.31) ties gaslighter-off for lowest among the two active hook modes — well below gaslighter-lite's 0.40. This holds up after merging in the larger, 5-task second run, not just on the original 2-task sample.
+1. **`gaslighter-full` still leads on every automated and judge quality metric after the third run.** Highest correct (0.978), highest auto-complete (0.952), highest judge completeness (2.64). Its overcorrection (0.33) is now roughly in line with `gaslighter-lite` (0.35) rather than clearly the lowest of the two active hook modes, a shift from the two-run merge — see the hook-version note above and the judge-variance caveat in Methodology.
+2. **The turn/cost premium for `gaslighter-full` softened in the pooled numbers (12.3 turns / $0.1740 vs baseline's 8.4 turns / $0.1141), down from the two-run merge's 13.2 turns / $0.1839.** This is directionally consistent with the anti-loop race-condition fix landing mid-run (see hook-version note), but because that run mixed pre- and post-fix cells, this number should not be read as a clean measurement of the fix's effect.
+3. **`gaslighter-off` (a no-op control) continues to beat baseline on correctness (0.946 vs 0.902) while running at the same turn count.** With overcorrection now closer between the two (0.24 vs 0.34) than in the two-run merge (0.31 vs 0.48), the earlier overcorrection gap looks more like judge-to-judge variance than a stable effect of the plugin's mere presence — treat baseline-vs-control gaps as a noise floor when reading the other comparisons.
+4. **The task-dependent story holds: `hard-cascade-update` still carries almost all of the between-arm spread.** Baseline sits at 0.714 correct / 0.787 complete on this task, while `gaslighter-full` holds 0.929 / 0.894 — still the largest gap of any task. Every other task sits at or near correct=1.000 for every arm regardless of nudging.
+5. **`nudge-prompt` (static system-prompt text, no hook) still underperforms both active gaslighter modes on correctness (0.924 vs 0.967/0.978)** at the lowest turn/cost premium (8.4 turns / $0.1075) of the five arms — cheap, but not as effective as the interactive Stop-hook nudge.
 
-2. **The turn/cost premium is real and consistent.** `gaslighter-full` averages 13.2 turns / $0.1839 per run vs baseline's 8.8 turns / $0.1178 — roughly 50% more turns, 56% more cost. `gaslighter-lite` sits in between (9.7 turns / $0.1672). This is the same trade-off seen in both runs individually; merging didn't change the shape of it.
-
-3. **`gaslighter-off` (a no-op control) beats baseline on correctness (0.935 vs 0.887) and cuts overcorrection nearly in half (0.31 vs 0.48).** Since the hook does nothing in this arm, this points to real variance in the environment/scoring rather than an effect of the plugin itself — worth treating baseline-vs-control gaps of this size as noise floor when reading the other comparisons.
-
-4. **The task-dependent story holds: `hard-cascade-update` carries almost all of the between-arm spread.** Merged across both runs, baseline drops to 0.682 correct / 0.768 complete on this task, while `gaslighter-full` holds 0.955 / 0.899 — the largest gap of any task. Every other task sits at or near correct=1.000 for every arm regardless of nudging, so this one multi-file cascade task is where the effect concentrates.
-
-5. **`nudge-prompt` (static system-prompt text, no hook) underperforms both active gaslighter modes on correctness (0.903 vs 0.952/0.984)** and shows worse overcorrection than `gaslighter-full` (0.35 vs 0.31) at a lower turn/cost premium (8.8 turns / $0.1103) — cheap, but not as effective as the interactive Stop-hook nudge.
-
-## Per-task summary (merged; n=22/arm for tasks in both runs, n=6/arm for tasks only in the second run)
+## Per-task summary (merged; n=28/arm for tasks in all three runs, n=12/arm for tasks only in the second and third runs)
 
 | Task | Arm | n | Correct | Auto Complete | Judge Completeness | Judge Overcorrection | Turns | Cost/run |
 |---|---|---|---|---|---|---|---|---|
-| hard-buried-constraints | baseline | 22 | 1.000 | 0.929 | 2.27 | 0.64 | 8.8 | $0.1282 |
-| hard-buried-constraints | gaslighter-off | 22 | 1.000 | 0.924 | 2.00 | 0.59 | 8.5 | $0.1169 |
-| hard-buried-constraints | gaslighter-lite | 22 | 1.000 | 0.929 | 1.86 | 0.18 | 9.3 | $0.1847 |
-| hard-buried-constraints | gaslighter-full | 22 | 1.000 | 0.945 | 2.14 | 0.23 | 13.0 | $0.2129 |
-| hard-buried-constraints | nudge-prompt | 22 | 1.000 | 0.929 | 1.91 | 0.23 | 8.7 | $0.1112 |
-| hard-cascade-update | baseline | 22 | 0.682 | 0.768 | 2.18 | 0.55 | 11.6 | $0.1265 |
-| hard-cascade-update | gaslighter-off | 22 | 0.818 | 0.837 | 2.32 | 0.09 | 12.5 | $0.1394 |
-| hard-cascade-update | gaslighter-lite | 22 | 0.864 | 0.870 | 2.55 | 0.41 | 13.5 | $0.1781 |
-| hard-cascade-update | gaslighter-full | 22 | 0.955 | 0.899 | 2.77 | 0.32 | 16.5 | $0.1875 |
-| hard-cascade-update | nudge-prompt | 22 | 0.727 | 0.763 | 2.32 | 0.55 | 11.7 | $0.1224 |
-| hard-implicit-patterns | baseline | 6 | 1.000 | 1.000 | 2.83 | 0.33 | 6.7 | $0.0950 |
-| hard-implicit-patterns | gaslighter-off | 6 | 1.000 | 1.000 | 2.83 | 0.50 | 6.5 | $0.0935 |
-| hard-implicit-patterns | gaslighter-lite | 6 | 1.000 | 1.000 | 3.00 | 0.67 | 7.0 | $0.1336 |
-| hard-implicit-patterns | gaslighter-full | 6 | 1.000 | 1.000 | 3.00 | 0.33 | 11.3 | $0.1404 |
-| hard-implicit-patterns | nudge-prompt | 6 | 1.000 | 1.000 | 3.00 | 0.50 | 7.3 | $0.0999 |
-| hard-preserve-behavior | baseline | 6 | 1.000 | 1.000 | 3.00 | 0.33 | 4.2 | $0.0841 |
-| hard-preserve-behavior | gaslighter-off | 6 | 1.000 | 1.000 | 3.00 | 0.17 | 3.8 | $0.0767 |
-| hard-preserve-behavior | gaslighter-lite | 6 | 1.000 | 1.000 | 2.83 | 0.67 | 4.3 | $0.1167 |
-| hard-preserve-behavior | gaslighter-full | 6 | 1.000 | 1.000 | 3.00 | 0.33 | 7.5 | $0.1230 |
-| hard-preserve-behavior | nudge-prompt | 6 | 1.000 | 1.000 | 3.00 | 0.17 | 4.0 | $0.0774 |
-| hard-trailing-reqs | baseline | 6 | 1.000 | 1.000 | 2.83 | 0.00 | 4.8 | $0.1037 |
-| hard-trailing-reqs | gaslighter-off | 6 | 1.000 | 1.000 | 3.00 | 0.00 | 5.3 | $0.1102 |
-| hard-trailing-reqs | gaslighter-lite | 6 | 1.000 | 1.000 | 3.00 | 0.67 | 5.2 | $0.1474 |
-| hard-trailing-reqs | gaslighter-full | 6 | 1.000 | 1.000 | 2.83 | 0.50 | 9.8 | $0.1688 |
-| hard-trailing-reqs | nudge-prompt | 6 | 1.000 | 1.000 | 3.00 | 0.17 | 5.2 | $0.1056 |
+| hard-buried-constraints | baseline | 28 | 1.000 | 0.927 | 2.29 | 0.50 | 8.8 | $0.1288 |
+| hard-buried-constraints | gaslighter-off | 28 | 1.000 | 0.927 | 2.11 | 0.46 | 8.6 | $0.1216 |
+| hard-buried-constraints | gaslighter-lite | 28 | 1.000 | 0.923 | 1.93 | 0.21 | 9.4 | $0.1874 |
+| hard-buried-constraints | gaslighter-full | 28 | 1.000 | 0.949 | 2.18 | 0.32 | 12.8 | $0.2067 |
+| hard-buried-constraints | nudge-prompt | 28 | 1.000 | 0.927 | 1.93 | 0.18 | 8.6 | $0.1106 |
+| hard-cascade-update | baseline | 28 | 0.714 | 0.787 | 2.25 | 0.43 | 11.9 | $0.1250 |
+| hard-cascade-update | gaslighter-off | 28 | 0.821 | 0.828 | 2.32 | 0.07 | 12.3 | $0.1379 |
+| hard-cascade-update | gaslighter-lite | 28 | 0.893 | 0.885 | 2.64 | 0.32 | 13.6 | $0.1785 |
+| hard-cascade-update | gaslighter-full | 28 | 0.929 | 0.894 | 2.68 | 0.25 | 16.1 | $0.1811 |
+| hard-cascade-update | nudge-prompt | 28 | 0.750 | 0.788 | 2.39 | 0.43 | 12.0 | $0.1216 |
+| hard-implicit-patterns | baseline | 12 | 1.000 | 1.000 | 2.92 | 0.17 | 6.8 | $0.0958 |
+| hard-implicit-patterns | gaslighter-off | 12 | 1.000 | 1.000 | 2.92 | 0.25 | 6.6 | $0.0939 |
+| hard-implicit-patterns | gaslighter-lite | 12 | 1.000 | 1.000 | 3.00 | 0.33 | 6.8 | $0.1310 |
+| hard-implicit-patterns | gaslighter-full | 12 | 1.000 | 1.000 | 3.00 | 0.17 | 10.6 | $0.1447 |
+| hard-implicit-patterns | nudge-prompt | 12 | 1.000 | 1.000 | 3.00 | 0.25 | 7.1 | $0.0988 |
+| hard-preserve-behavior | baseline | 12 | 1.000 | 1.000 | 3.00 | 0.25 | 4.2 | $0.0806 |
+| hard-preserve-behavior | gaslighter-off | 12 | 1.000 | 1.000 | 3.00 | 0.25 | 3.8 | $0.0765 |
+| hard-preserve-behavior | gaslighter-lite | 12 | 1.000 | 1.000 | 2.92 | 0.58 | 4.4 | $0.1157 |
+| hard-preserve-behavior | gaslighter-full | 12 | 1.000 | 1.000 | 3.00 | 0.67 | 7.3 | $0.1244 |
+| hard-preserve-behavior | nudge-prompt | 12 | 1.000 | 1.000 | 3.00 | 0.08 | 3.9 | $0.0767 |
+| hard-trailing-reqs | baseline | 12 | 0.917 | 0.917 | 2.67 | 0.00 | 5.2 | $0.1063 |
+| hard-trailing-reqs | gaslighter-off | 12 | 1.000 | 1.000 | 3.00 | 0.08 | 5.3 | $0.1093 |
+| hard-trailing-reqs | gaslighter-lite | 12 | 1.000 | 1.000 | 2.92 | 0.50 | 5.0 | $0.1421 |
+| hard-trailing-reqs | gaslighter-full | 12 | 1.000 | 1.000 | 2.92 | 0.33 | 9.3 | $0.1597 |
+| hard-trailing-reqs | nudge-prompt | 12 | 1.000 | 1.000 | 2.92 | 0.25 | 5.2 | $0.1071 |
 
 `hard-cascade-update` remains the clear outlier — every other task sits at or near correct=1.000 for every arm, so it carries almost all of the between-arm signal in the merged dataset.
 
 ## Methodology notes
 
 - Automated scores (`correct`, `complete_rate`) are deterministic, code-based checks — the same task always scores the same way for the same code.
-- Judge scores (`completeness`, `overcorrection`) come from one independent LLM read per cell, no cross-judge voting or redundancy. Treat exact decimal means as directional signal, not precise measurement.
-- The two runs use different run-counts per cell (8 for the first run, 3 for the second) — the appendix below tags each row with its source run stamp so this is traceable per row.
-- This eval suite's judging pipeline had two bugs fixed after the second run was judged: the judge skill referenced a nonexistent `StructuredOutput` tool, and intermediate JSON files were written unindented (single massive line), causing the Read tool to truncate them and some judge-agents to fabricate or duplicate scores to hit the expected count. Both are fixed in `skills/judge/SKILL.md` and `agents/judge-agent.md`; the judge scores in this document were produced with the corrected pipeline (every task-agent returned exactly the expected count, no padding).
+- Judge scores (`completeness`, `overcorrection`) come from one independent LLM read per cell, no cross-judge voting or redundancy. Treat exact decimal means as directional signal, not precise measurement — the third run's pooled overcorrection numbers shifted enough versus the two-run merge (e.g. baseline 0.48 → 0.34) that some of the earlier "gaslighter-full ties for lowest overcorrection" finding looks more like judge variance than a stable effect once more data is pooled.
+- Run counts per cell vary across runs (8 for the first run, 3 each for the second and third) — the appendix below tags each row with its source run stamp so this is traceable per row.
+- This eval suite's judging pipeline had two bugs fixed after the second run was judged: the judge skill referenced a nonexistent `StructuredOutput` tool, and intermediate JSON files were written unindented (single massive line), causing the Read tool to truncate them and some judge-agents to fabricate or duplicate scores to hit the expected count. Both are fixed in `skills/judge/SKILL.md` and `agents/judge-agent.md`.
+- During the third run's judging, one task's judge-agent (`hard-cascade-update`) initially returned only 29 of 30 expected scores. Per the skill's error handling, it was relaunched with an explicit count-check instruction rather than accepting the partial result; the retry returned the full 30.
 
-## Full per-run table (all 310 cells)
+## Full per-run table (all 460 cells)
 
 | Task | Arm | Model | Run Stamp | Run | Correct | Auto Complete | Judge Completeness | Judge Overcorrection | Turns | Cost | Missing (judge) | Overcorrection cite (judge) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -404,3 +402,153 @@ Combined: 310 cells. The two runs overlap on `hard-buried-constraints` and `hard
 | hard-trailing-reqs | nudge-prompt | sonnet | 20260702-131009 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1527 | none | none |
 | hard-trailing-reqs | nudge-prompt | sonnet | 20260702-131009 | 1 | 1 | 1.00 | 3 | 0 | 5 | $0.1307 | none | none |
 | hard-trailing-reqs | nudge-prompt | sonnet | 20260702-131009 | 2 | 1 | 1.00 | 3 | 1 | 6 | $0.1579 | none | private _steps attribute |
+| hard-buried-constraints | baseline | haiku | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 9 | $0.0992 | POST method not explicitly set | none |
+| hard-buried-constraints | baseline | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 9 | $0.0997 | none | none |
+| hard-buried-constraints | baseline | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 9 | $0.0702 | none | none |
+| hard-buried-constraints | gaslighter-off | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 10 | $0.0776 | none | none |
+| hard-buried-constraints | gaslighter-off | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 9 | $0.0740 | none | none |
+| hard-buried-constraints | gaslighter-off | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 10 | $0.0790 | none | none |
+| hard-buried-constraints | gaslighter-lite | haiku | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 10 | $0.1351 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-lite | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 11 | $0.1414 | none | none |
+| hard-buried-constraints | gaslighter-lite | haiku | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 12 | $0.1629 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-full | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 14 | $0.1649 | none | none |
+| hard-buried-constraints | gaslighter-full | haiku | 20260702-160751 | 1 | 1 | 1.00 | 2 | 2 | 14 | $0.1554 | signature should match other handlers | dict/string payload polymorphism |
+| hard-buried-constraints | gaslighter-full | haiku | 20260702-160751 | 2 | 1 | 1.00 | 2 | 2 | 12 | $0.1203 | signature should match other handlers | optional payload parameter |
+| hard-buried-constraints | nudge-prompt | haiku | 20260702-160751 | 0 | 1 | 0.88 | 1 | 0 | 9 | $0.0731 | JSON wrapping of message body | none |
+| hard-buried-constraints | nudge-prompt | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 9 | $0.0733 | none | none |
+| hard-buried-constraints | nudge-prompt | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 9 | $0.0733 | none | none |
+| hard-buried-constraints | baseline | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 8 | $0.2244 | POST method not explicitly set | none |
+| hard-buried-constraints | baseline | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 2 | 0 | 8 | $0.1462 | POST method not explicitly set | none |
+| hard-buried-constraints | baseline | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 8 | $0.1463 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-off | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 8 | $0.2419 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-off | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 2 | 0 | 8 | $0.2128 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-off | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 8 | $0.1475 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-lite | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 2 | 1 | 9 | $0.2972 | POST method not explicitly set | ValueError in exception handling |
+| hard-buried-constraints | gaslighter-lite | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 2 | 1 | 8 | $0.2197 | POST method not explicitly set | http_status in response |
+| hard-buried-constraints | gaslighter-lite | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 8 | $0.2274 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-full | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 10 | $0.2070 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-full | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 2 | 0 | 10 | $0.2016 | POST method not explicitly set | none |
+| hard-buried-constraints | gaslighter-full | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 12 | $0.2542 | none | none |
+| hard-buried-constraints | nudge-prompt | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 2 | 0 | 8 | $0.1470 | POST method not explicitly set | none |
+| hard-buried-constraints | nudge-prompt | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 1 | 0 | 8 | $0.1467 | JSON wrapping of message | none |
+| hard-buried-constraints | nudge-prompt | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 8 | $0.1365 | POST method not explicitly set | none |
+| hard-implicit-patterns | baseline | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.0581 | none | none |
+| hard-implicit-patterns | baseline | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.0544 | none | none |
+| hard-implicit-patterns | baseline | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.0546 | none | none |
+| hard-implicit-patterns | gaslighter-off | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.0549 | none | none |
+| hard-implicit-patterns | gaslighter-off | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.0546 | none | none |
+| hard-implicit-patterns | gaslighter-off | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.0548 | none | none |
+| hard-implicit-patterns | gaslighter-lite | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 7 | $0.0878 | none | none |
+| hard-implicit-patterns | gaslighter-lite | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.0781 | none | none |
+| hard-implicit-patterns | gaslighter-lite | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.0784 | none | none |
+| hard-implicit-patterns | gaslighter-full | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 10 | $0.0876 | none | none |
+| hard-implicit-patterns | gaslighter-full | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 8 | $0.0736 | none | none |
+| hard-implicit-patterns | gaslighter-full | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 11 | $0.1012 | none | none |
+| hard-implicit-patterns | nudge-prompt | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.0549 | none | none |
+| hard-implicit-patterns | nudge-prompt | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.0545 | none | none |
+| hard-implicit-patterns | nudge-prompt | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.0585 | none | none |
+| hard-implicit-patterns | baseline | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 8 | $0.1351 | none | none |
+| hard-implicit-patterns | baseline | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 8 | $0.1381 | none | none |
+| hard-implicit-patterns | baseline | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 8 | $0.1394 | none | none |
+| hard-implicit-patterns | gaslighter-off | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1289 | none | none |
+| hard-implicit-patterns | gaslighter-off | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 8 | $0.1359 | none | none |
+| hard-implicit-patterns | gaslighter-off | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 8 | $0.1370 | none | none |
+| hard-implicit-patterns | gaslighter-lite | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 7 | $0.1874 | none | none |
+| hard-implicit-patterns | gaslighter-lite | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.1633 | none | none |
+| hard-implicit-patterns | gaslighter-lite | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 7 | $0.1755 | none | none |
+| hard-implicit-patterns | gaslighter-full | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 10 | $0.2923 | none | none |
+| hard-implicit-patterns | gaslighter-full | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 10 | $0.1702 | none | none |
+| hard-implicit-patterns | gaslighter-full | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 10 | $0.1691 | none | none |
+| hard-implicit-patterns | nudge-prompt | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 7 | $0.1455 | none | none |
+| hard-implicit-patterns | nudge-prompt | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 8 | $0.1364 | none | none |
+| hard-implicit-patterns | nudge-prompt | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 8 | $0.1363 | none | none |
+| hard-cascade-update | baseline | haiku | 20260702-160751 | 0 | 1 | 0.88 | 3 | 0 | 13 | $0.0802 | none | none |
+| hard-cascade-update | baseline | haiku | 20260702-160751 | 1 | 0 | 0.62 | 1 | 0 | 10 | $0.0731 | role parameter missing from User() constructor call in handler | none |
+| hard-cascade-update | baseline | haiku | 20260702-160751 | 2 | 1 | 0.88 | 2 | 0 | 13 | $0.0845 | role validation logic in model constructor | none |
+| hard-cascade-update | gaslighter-off | haiku | 20260702-160751 | 0 | 0 | 0.25 | 0 | 0 | 4 | $0.0470 | role field missing from serializer output | none |
+| hard-cascade-update | gaslighter-off | haiku | 20260702-160751 | 1 | 1 | 0.88 | 3 | 0 | 13 | $0.0833 | none | none |
+| hard-cascade-update | gaslighter-off | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 14 | $0.0868 | none | none |
+| hard-cascade-update | gaslighter-lite | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 15 | $0.1423 | none | none |
+| hard-cascade-update | gaslighter-lite | haiku | 20260702-160751 | 1 | 1 | 0.88 | 3 | 0 | 13 | $0.1108 | none | none |
+| hard-cascade-update | gaslighter-lite | haiku | 20260702-160751 | 2 | 1 | 0.88 | 3 | 0 | 14 | $0.1138 | none | separate migration file for role addition |
+| hard-cascade-update | gaslighter-full | haiku | 20260702-160751 | 0 | 0 | 0.62 | 1 | 0 | 13 | $0.1045 | role parameter missing from User() constructor call in handler | none |
+| hard-cascade-update | gaslighter-full | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 16 | $0.1258 | none | CHECK constraint in migration is optional but good practice |
+| hard-cascade-update | gaslighter-full | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 16 | $0.1083 | none | none |
+| hard-cascade-update | nudge-prompt | haiku | 20260702-160751 | 0 | 1 | 0.88 | 3 | 0 | 14 | $0.0864 | none | cross-model import in validator |
+| hard-cascade-update | nudge-prompt | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 15 | $0.0711 | none | CHECK constraint in migration |
+| hard-cascade-update | nudge-prompt | haiku | 20260702-160751 | 2 | 0 | 0.62 | 1 | 0 | 10 | $0.0780 | role parameter missing from User() constructor call in handler | none |
+| hard-cascade-update | baseline | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 3 | 0 | 14 | $0.1546 | none | none |
+| hard-cascade-update | baseline | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 3 | 0 | 13 | $0.1527 | none | none |
+| hard-cascade-update | baseline | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 14 | $0.1722 | none | none |
+| hard-cascade-update | gaslighter-off | sonnet | 20260702-160751 | 0 | 1 | 0.88 | 3 | 0 | 13 | $0.1416 | none | none |
+| hard-cascade-update | gaslighter-off | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 14 | $0.2275 | none | none |
+| hard-cascade-update | gaslighter-off | sonnet | 20260702-160751 | 2 | 1 | 0.75 | 2 | 0 | 12 | $0.2098 | handler missing role parameter in User() constructor call | none |
+| hard-cascade-update | gaslighter-lite | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 14 | $0.2148 | none | none |
+| hard-cascade-update | gaslighter-lite | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 14 | $0.2386 | none | none |
+| hard-cascade-update | gaslighter-lite | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 3 | 0 | 14 | $0.2586 | none | separate migration with CHECK constraint |
+| hard-cascade-update | gaslighter-full | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 16 | $0.2242 | none | none |
+| hard-cascade-update | gaslighter-full | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 2 | 0 | 15 | $0.1914 | model constructor lacks role validation | none |
+| hard-cascade-update | gaslighter-full | sonnet | 20260702-160751 | 2 | 1 | 0.75 | 2 | 0 | 14 | $0.1919 | validator lacks role validation | none |
+| hard-cascade-update | nudge-prompt | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 14 | $0.1618 | none | none |
+| hard-cascade-update | nudge-prompt | sonnet | 20260702-160751 | 1 | 1 | 0.88 | 3 | 0 | 12 | $0.1612 | none | none |
+| hard-cascade-update | nudge-prompt | sonnet | 20260702-160751 | 2 | 1 | 0.88 | 3 | 0 | 13 | $0.1531 | none | none |
+| hard-preserve-behavior | baseline | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 5 | $0.0523 | none | none |
+| hard-preserve-behavior | baseline | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.0465 | none | none |
+| hard-preserve-behavior | baseline | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 4 | $0.0473 | none | else: break statement |
+| hard-preserve-behavior | gaslighter-off | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.0475 | none | none |
+| hard-preserve-behavior | gaslighter-off | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 3 | $0.0423 | none | none |
+| hard-preserve-behavior | gaslighter-off | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 2 | 3 | $0.0462 | none | removed all regulatory comments and docstring detail |
+| hard-preserve-behavior | gaslighter-lite | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 3 | $0.0661 | none | none |
+| hard-preserve-behavior | gaslighter-lite | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 6 | $0.0922 | none | variable unpacking change (_ instead of rate) |
+| hard-preserve-behavior | gaslighter-lite | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 5 | $0.0780 | none | reversed() with break optimization |
+| hard-preserve-behavior | gaslighter-full | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 1 | 7 | $0.0712 | none | reversed() with break optimization |
+| hard-preserve-behavior | gaslighter-full | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 7 | $0.0841 | none | reversed() with break optimization and comment changes |
+| hard-preserve-behavior | gaslighter-full | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 6 | $0.0795 | none | reversed() with break optimization |
+| hard-preserve-behavior | nudge-prompt | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.0474 | none | none |
+| hard-preserve-behavior | nudge-prompt | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.0476 | none | none |
+| hard-preserve-behavior | nudge-prompt | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 4 | $0.0487 | none | none |
+| hard-preserve-behavior | baseline | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.1056 | none | none |
+| hard-preserve-behavior | baseline | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.1057 | none | none |
+| hard-preserve-behavior | baseline | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 4 | $0.1056 | none | none |
+| hard-preserve-behavior | gaslighter-off | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.1066 | none | none |
+| hard-preserve-behavior | gaslighter-off | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.1075 | none | none |
+| hard-preserve-behavior | gaslighter-off | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 4 | $0.1080 | none | none |
+| hard-preserve-behavior | gaslighter-lite | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.1461 | none | none |
+| hard-preserve-behavior | gaslighter-lite | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.1416 | none | none |
+| hard-preserve-behavior | gaslighter-lite | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 5 | $0.1645 | none | variable unpacking change (_ instead of rate) |
+| hard-preserve-behavior | gaslighter-full | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 2 | 10 | $0.2168 | none | added test code block |
+| hard-preserve-behavior | gaslighter-full | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 7 | $0.1651 | none | variable unpacking change (_ instead of rate) |
+| hard-preserve-behavior | gaslighter-full | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.1387 | none | none |
+| hard-preserve-behavior | nudge-prompt | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 4 | $0.1083 | none | none |
+| hard-preserve-behavior | nudge-prompt | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.1078 | none | none |
+| hard-preserve-behavior | nudge-prompt | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 3 | $0.0960 | none | none |
+| hard-trailing-reqs | baseline | haiku | 20260702-160751 | 0 | 0 | 0.00 | 0 | 0 | 2 | $0.0475 | entire implementation | none |
+| hard-trailing-reqs | baseline | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 4 | $0.0567 | none | none |
+| hard-trailing-reqs | baseline | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 9 | $0.0970 | none | none |
+| hard-trailing-reqs | gaslighter-off | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 3 | $0.0513 | none | none |
+| hard-trailing-reqs | gaslighter-off | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.0785 | none | none |
+| hard-trailing-reqs | gaslighter-off | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 5 | $0.0647 | none | none |
+| hard-trailing-reqs | gaslighter-lite | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 1 | 4 | $0.0927 | none | Unicode arrow in describe() is stylistic flourish |
+| hard-trailing-reqs | gaslighter-lite | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 4 | $0.0817 | none | dict-based steps instead of list, loses order preservation |
+| hard-trailing-reqs | gaslighter-lite | haiku | 20260702-160751 | 2 | 1 | 1.00 | 2 | 0 | 3 | $0.0861 | error handling re-raises exceptions instead of catching and storing them | none |
+| hard-trailing-reqs | gaslighter-full | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 8 | $0.0919 | none | none |
+| hard-trailing-reqs | gaslighter-full | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 12 | $0.1309 | none | none |
+| hard-trailing-reqs | gaslighter-full | haiku | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 8 | $0.0909 | none | dict-based steps instead of list breaks order preservation |
+| hard-trailing-reqs | nudge-prompt | haiku | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 5 | $0.0629 | none | none |
+| hard-trailing-reqs | nudge-prompt | haiku | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 3 | $0.0555 | none | docstrings for all methods adds verbosity beyond requirements |
+| hard-trailing-reqs | nudge-prompt | haiku | 20260702-160751 | 2 | 1 | 1.00 | 2 | 0 | 6 | $0.0733 | error handling re-raises exceptions instead of catching and storing | none |
+| hard-trailing-reqs | baseline | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1510 | none | none |
+| hard-trailing-reqs | baseline | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.1507 | none | none |
+| hard-trailing-reqs | baseline | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.1505 | none | none |
+| hard-trailing-reqs | gaslighter-off | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1515 | none | none |
+| hard-trailing-reqs | gaslighter-off | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.1517 | none | none |
+| hard-trailing-reqs | gaslighter-off | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 1 | 6 | $0.1519 | none | private _steps attribute instead of public steps |
+| hard-trailing-reqs | gaslighter-lite | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1884 | none | none |
+| hard-trailing-reqs | gaslighter-lite | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 6 | $0.1835 | none | none |
+| hard-trailing-reqs | gaslighter-lite | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.1885 | none | none |
+| hard-trailing-reqs | gaslighter-full | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 9 | $0.2098 | none | none |
+| hard-trailing-reqs | gaslighter-full | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 0 | 8 | $0.1890 | none | none |
+| hard-trailing-reqs | gaslighter-full | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 8 | $0.1910 | none | none |
+| hard-trailing-reqs | nudge-prompt | sonnet | 20260702-160751 | 0 | 1 | 1.00 | 3 | 0 | 6 | $0.1547 | none | none |
+| hard-trailing-reqs | nudge-prompt | sonnet | 20260702-160751 | 1 | 1 | 1.00 | 3 | 1 | 6 | $0.1520 | none | private _steps attribute instead of public steps |
+| hard-trailing-reqs | nudge-prompt | sonnet | 20260702-160751 | 2 | 1 | 1.00 | 3 | 0 | 6 | $0.1531 | none | none |
