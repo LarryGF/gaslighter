@@ -205,5 +205,19 @@ test('anti-loop: stops nudging as soon as the model declares 100% confidence, be
   assert.strictEqual(third.status, 0);
 });
 
+// --- readStable: survives a transcript that's still being written ---
+
+test('readStable: waits out a delayed write instead of reading a stale/partial file', function () {
+  var p = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'stale text' }] } }
+  ]);
+  var finalLine = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'fresh text' }] } });
+  // Simulate the harness still flushing the transcript: append the real final
+  // line from a detached async process shortly after we start polling.
+  require('child_process').spawn('bash', ['-c', 'sleep 0.03 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
+  var text = nudge.lastAssistantText(p);
+  assert.strictEqual(text, 'fresh text');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed > 0 ? 1 : 0);

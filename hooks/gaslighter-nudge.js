@@ -80,13 +80,33 @@ function confidenceDeclared(text) {
   return CONFIDENCE_RE.test(text || '');
 }
 
+// Stop hooks can fire before the harness finishes flushing the just-completed
+// turn to transcript_path. A single read can observe a stale (previous-turn)
+// version of the file, which broke the escape hatch below. Re-read after a
+// short wait and keep the longest version seen — a completed flush only ever
+// grows the file, so the longest read is the most complete one available.
+function sleepSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (e) {}
+}
+
+function readStable(transcriptPath) {
+  var best = '';
+  for (var i = 0; i < 3; i++) {
+    if (i > 0) sleepSync(20);
+    var content;
+    try { content = fs.readFileSync(transcriptPath, 'utf8'); } catch (e) { continue; }
+    if (content.length > best.length) best = content;
+  }
+  return best;
+}
+
 // Reads the last assistant turn's text from the Stop hook's transcript_path,
 // so we can tell whether the model already used the escape hatch offered by
 // SUBSEQUENT_NUDGE before firing another nudge.
 function lastAssistantText(transcriptPath) {
   if (!transcriptPath) return '';
   try {
-    var lines = fs.readFileSync(transcriptPath, 'utf8').split('\n');
+    var lines = readStable(transcriptPath).split('\n');
     for (var i = lines.length - 1; i >= 0; i--) {
       var line = lines[i].trim();
       if (!line) continue;
@@ -129,5 +149,5 @@ function saveState(state, sessionId) {
 
 // Exported for testing
 if (typeof module !== 'undefined') {
-  module.exports = { getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText };
+  module.exports = { getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, readStable };
 }
