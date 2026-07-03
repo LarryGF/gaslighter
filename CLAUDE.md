@@ -4,26 +4,32 @@ Claude Code plugin that uses a Stop hook to nudge Claude into verifying requirem
 
 ## How It Works
 
-When Claude uses Write or Edit tools, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: max 3 nudges per session. First nudge forces re-examination; subsequent nudges give an escape hatch — if the model's last turn (read from `transcript_path`) already declares "100% certain/confident/sure", the hook stops nudging immediately instead of counting up to 3 regardless of what was said.
+When Claude uses Write or Edit tools, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; subsequent nudges give an escape hatch — if the model's last turn (read from `transcript_path`) already declares "100% certain/confident/sure", the hook stops nudging immediately instead of counting up to the cap regardless of what was said.
 
 ## Modes
 
-Set via `GASLIGHTER_MODE` env var. Both deliver via stdout + exit 0 (per the [Stop Hook Reference](https://code.claude.com/docs/en/hooks.md#stop-hook-reference), the JSON decision protocol only works this way):
-- `lite` (default) — `hookSpecificOutput.additionalContext`, non-blocking soft nudge
-- `full` — `decision: "block"`, hard block
-- `off` — disabled
+Mode and nudge cap are persisted to `${CLAUDE_PLUGIN_DATA}/config.json` (`{ "mode": "lite", "maxNudges": 3 }`, `maxNudges` optional). Set via the `gaslighter:config` skill. Precedence for each setting independently: env var > persisted `config.json` > mode default.
+
+Both delivery modes deliver via stdout + exit 0 (per the [Stop Hook Reference](https://code.claude.com/docs/en/hooks.md#stop-hook-reference), the JSON decision protocol only works this way):
+- `lite` (default) — `hookSpecificOutput.additionalContext`, non-blocking soft nudge, default cap 3
+- `full` — `decision: "block"`, hard block, default cap unlimited
+- `off` — disabled, cap always 0
+
+`GASLIGHTER_MODE` overrides the persisted mode; `GASLIGHTER_MAX_NUDGES` overrides the persisted/default cap (`infinite`/`unlimited`/`-1` for no cap).
 
 ## Structure
 
 - `.claude-plugin/plugin.json` — plugin manifest
 - `hooks/` — hook scripts (Node.js, CommonJS)
   - `gaslighter-hooks.json` — hook registration (Stop only)
-  - `gaslighter-nudge.js` — Stop hook: mode check, anti-loop guard, emit nudge
+  - `gaslighter-nudge.js` — Stop hook: mode/config check, anti-loop guard, emit nudge
+  - `gaslighter-config-cli.js` — CLI wrapper for reading/writing persisted config.json
   - `gaslighter-statusline.sh` / `.ps1` — statusline badge
   - `package.json` — CommonJS marker
 - `agents/judge-agent.md` — judge sub-agent definition (rubrics, calibration)
-- `skills/gaslighter/SKILL.md` — orchestrator skill (routes to eval/judge)
+- `skills/gaslighter/SKILL.md` — orchestrator skill (routes to eval/judge/config)
 - `skills/judge/SKILL.md` — eval judging orchestrator (fans out to judge-agent)
+- `skills/config/SKILL.md` — persists mode/nudge cap to config.json
 - `evals/` — benchmark suite
 - `tests/` — unit tests
 
@@ -37,5 +43,5 @@ node tests/test-nudge-decision.js
 
 - Hook paths use `${CLAUDE_PLUGIN_ROOT}`, never `CLAUDE_SKILL_DIR`
 - Session state stored in `${CLAUDE_PLUGIN_DATA}/state-{session_id}.json`
-- Mode controlled by `GASLIGHTER_MODE` env var (full/lite/off)
+- Config (mode/maxNudges) persisted in `${CLAUDE_PLUGIN_DATA}/config.json`, overridable via `GASLIGHTER_MODE` / `GASLIGHTER_MAX_NUDGES` env vars
 - All hooks have `commandWindows` equivalents

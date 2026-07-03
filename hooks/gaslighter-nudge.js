@@ -30,7 +30,7 @@ process.stdin.on('end', function () {
     var state = loadState(sessionId);
     state.turn_count = (state.turn_count || 0) + 1;
 
-    if ((state.nudge_count || 0) >= 3) { saveState(state, sessionId); process.exit(0); }
+    if ((state.nudge_count || 0) >= getMaxNudges(mode)) { saveState(state, sessionId); process.exit(0); }
 
     var isFirst = (state.nudge_count || 0) === 0;
 
@@ -70,8 +70,29 @@ var SUBSEQUENT_NUDGE =
   "is implemented. If after re-reading you are 100% certain everything is covered, " +
   "say so explicitly and finish. If anything is missing, fix it now.";
 
+var MODE_DEFAULT_MAX = { off: 0, lite: 3, full: Infinity };
+
 function getMode() {
-  return (process.env.GASLIGHTER_MODE || 'lite').toLowerCase();
+  return (process.env.GASLIGHTER_MODE || loadConfig().mode || 'lite').toLowerCase();
+}
+
+function parseMaxNudges(value) {
+  if (value === 'infinite' || value === 'unlimited' || value === -1 || value === '-1') return Infinity;
+  var n = parseInt(value, 10);
+  return isNaN(n) ? undefined : n;
+}
+
+function getMaxNudges(mode) {
+  if (process.env.GASLIGHTER_MAX_NUDGES !== undefined) {
+    var fromEnv = parseMaxNudges(process.env.GASLIGHTER_MAX_NUDGES);
+    if (fromEnv !== undefined) return fromEnv;
+  }
+  var cfg = loadConfig();
+  if (cfg.maxNudges !== undefined && cfg.maxNudges !== null) {
+    var fromCfg = parseMaxNudges(cfg.maxNudges);
+    if (fromCfg !== undefined) return fromCfg;
+  }
+  return MODE_DEFAULT_MAX[mode];
 }
 
 var CONFIDENCE_RE = /\b100%\s*(certain|confident|sure)\b/i;
@@ -126,11 +147,15 @@ function lastAssistantText(transcriptPath) {
 }
 
 
-function getStatePath(sessionId) {
+function getDataDir() {
   var dataDir = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data', 'gaslighter');
   try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
+  return dataDir;
+}
+
+function getStatePath(sessionId) {
   var sid = sessionId || process.env.CLAUDE_SESSION_ID || 'unknown';
-  return path.join(dataDir, 'state-' + sid + '.json');
+  return path.join(getDataDir(), 'state-' + sid + '.json');
 }
 
 function loadState(sessionId) {
@@ -147,7 +172,28 @@ function saveState(state, sessionId) {
   fs.writeFileSync(p, JSON.stringify(state));
 }
 
+function getConfigPath() {
+  return path.join(getDataDir(), 'config.json');
+}
+
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(getConfigPath(), 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveConfig(cfg) {
+  var p = getConfigPath();
+  try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) {}
+  fs.writeFileSync(p, JSON.stringify(cfg));
+}
+
 // Exported for testing
 if (typeof module !== 'undefined') {
-  module.exports = { getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, readStable };
+  module.exports = {
+    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, readStable,
+    loadConfig, saveConfig, getConfigPath, getMaxNudges, MODE_DEFAULT_MAX
+  };
 }
