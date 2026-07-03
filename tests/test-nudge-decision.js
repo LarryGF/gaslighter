@@ -86,6 +86,89 @@ test('saveState + loadState round-trips', function () {
   process.env.CLAUDE_SESSION_ID = origSession;
 });
 
+// --- config: load/save round-trip ---
+
+test('loadConfig returns {} on missing file', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  assert.deepStrictEqual(nudge.loadConfig(), {});
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+});
+
+test('saveConfig + loadConfig round-trips', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  nudge.saveConfig({ mode: 'full', maxNudges: 5 });
+  var loaded = nudge.loadConfig();
+  assert.strictEqual(loaded.mode, 'full');
+  assert.strictEqual(loaded.maxNudges, 5);
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+});
+
+// --- getMode: persisted config vs env precedence ---
+
+test('getMode: uses persisted config mode when env unset', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  var origMode = process.env.GASLIGHTER_MODE;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  delete process.env.GASLIGHTER_MODE;
+  nudge.saveConfig({ mode: 'full' });
+  assert.strictEqual(nudge.getMode(), 'full');
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+  if (origMode !== undefined) process.env.GASLIGHTER_MODE = origMode;
+});
+
+test('getMode: env var wins over persisted config', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  var origMode = process.env.GASLIGHTER_MODE;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  nudge.saveConfig({ mode: 'full' });
+  process.env.GASLIGHTER_MODE = 'off';
+  assert.strictEqual(nudge.getMode(), 'off');
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+  if (origMode !== undefined) process.env.GASLIGHTER_MODE = origMode;
+  else delete process.env.GASLIGHTER_MODE;
+});
+
+// --- getMaxNudges ---
+
+test('getMaxNudges: mode defaults (off=0, lite=3, full=Infinity)', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  var origMax = process.env.GASLIGHTER_MAX_NUDGES;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  delete process.env.GASLIGHTER_MAX_NUDGES;
+  assert.strictEqual(nudge.getMaxNudges('off'), 0);
+  assert.strictEqual(nudge.getMaxNudges('lite'), 3);
+  assert.strictEqual(nudge.getMaxNudges('full'), Infinity);
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+  if (origMax !== undefined) process.env.GASLIGHTER_MAX_NUDGES = origMax;
+});
+
+test('getMaxNudges: persisted maxNudges overrides mode default', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  var origMax = process.env.GASLIGHTER_MAX_NUDGES;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  delete process.env.GASLIGHTER_MAX_NUDGES;
+  nudge.saveConfig({ mode: 'lite', maxNudges: 7 });
+  assert.strictEqual(nudge.getMaxNudges('lite'), 7);
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+  if (origMax !== undefined) process.env.GASLIGHTER_MAX_NUDGES = origMax;
+});
+
+test('getMaxNudges: env GASLIGHTER_MAX_NUDGES overrides persisted config', function () {
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  var origMax = process.env.GASLIGHTER_MAX_NUDGES;
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
+  nudge.saveConfig({ mode: 'lite', maxNudges: 7 });
+  process.env.GASLIGHTER_MAX_NUDGES = '2';
+  assert.strictEqual(nudge.getMaxNudges('lite'), 2);
+  process.env.GASLIGHTER_MAX_NUDGES = 'infinite';
+  assert.strictEqual(nudge.getMaxNudges('lite'), Infinity);
+  process.env.CLAUDE_PLUGIN_DATA = origData;
+  if (origMax !== undefined) process.env.GASLIGHTER_MAX_NUDGES = origMax;
+  else delete process.env.GASLIGHTER_MAX_NUDGES;
+});
+
 // --- delivery protocol (stdout + exit 0) ---
 
 function runHook(mode, sessionId) {
@@ -217,6 +300,25 @@ test('readStable: waits out a delayed write instead of reading a stale/partial f
   require('child_process').spawn('bash', ['-c', 'sleep 0.03 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
   var text = nudge.lastAssistantText(p);
   assert.strictEqual(text, 'fresh text');
+});
+
+// --- end-to-end: persisted full config with no cap overrides a high nudge_count ---
+
+test('end-to-end: persisted full config (no GASLIGHTER_MODE) still nudges past 50 prior nudges', function () {
+  var sessionId = 'test-e2e-full-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ mode: 'full' }));
+  fs.writeFileSync(path.join(dataDir, 'state-' + sessionId + '.json'), JSON.stringify({ nudge_count: 50, turn_count: 50 }));
+  var env = Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  delete env.GASLIGHTER_MODE;
+  var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+    input: JSON.stringify({ session_id: sessionId }),
+    env: env,
+    encoding: 'utf8'
+  });
+  var out = JSON.parse(result.stdout);
+  assert.strictEqual(out.decision, 'block');
+  assert.ok(out.reason.includes('One more check'));
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
