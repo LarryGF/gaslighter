@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Tool-activity escape hatch**: after the first nudge, if the model's answering turn contains zero tool calls, the hook stops nudging — it re-checked and changed nothing, so the exact wording of its confirmation no longer matters. The "100% certain" regex remains as a fast-path. Unreadable/missing transcripts are treated as unknown and keep nudging.
+
+### Fixed
+
+- `readStable()` window widened from ~40ms to ~620ms worst case (doubling backoff, early exit once the file stops growing). The 40ms window was observed live losing the transcript-flush race, making the hook nudge straight past a "100% certain" declaration.
+
+---
+
 ## [1.1.0] - 2026-07-04
 
 ### Added

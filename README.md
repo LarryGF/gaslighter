@@ -32,7 +32,7 @@ Claude re-reads the request, catches "available alongside the existing handlers"
 
 ## How it works
 
-Each time Claude tries to finish a response, a [Stop hook](https://code.claude.com/docs/en/hooks) fires and asks it to re-verify the original request against what it actually did. It's built not to become a nag loop: one nudge per stop, a session cap, and an escape hatch — once Claude re-reads and declares it's 100% certain everything is covered, the nudging stops for the session.
+Each time Claude tries to finish a response, a [Stop hook](https://code.claude.com/docs/en/hooks) fires and asks it to re-verify the original request against what it actually did. It's built not to become a nag loop: one nudge per stop, a session cap, and an escape hatch — once Claude answers a nudge without changing anything (no tool calls) or declares it's 100% certain everything is covered, the nudging stops for the session.
 
 | Mode | Delivery | Default cap |
 |------|----------|-------------|
@@ -138,7 +138,7 @@ python3 run.py --all --runs 4       # full eval run
 The nudge never lies. Every requirement it asks Claude to re-check was really in your request — it just refuses to accept "done" at face value.
 
 **Won't it loop forever?**
-No. One nudge per stop, a per-session cap, and an escape hatch once Claude declares 100% certainty after actually re-reading.
+No. One nudge per stop, a per-session cap, and an escape hatch once Claude re-checks without changing anything or declares 100% certainty.
 
 **Why not just put "double-check your work" in the system prompt?**
 We tested exactly that. It scored below doing nothing. Timing beats wording.
