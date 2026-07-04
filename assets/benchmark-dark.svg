@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="242" viewBox="0 0 860 242" role="img" aria-label="Missed requirements per 100 tasks by arm; gaslighter-full is lowest at 1.1">
+<text x="170" y="22" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="15" font-weight="600" fill="#ffffff">Missed requirements per 100 tasks</text>
+<text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#c3c2b7">headless Claude Code sessions, deterministic scoring &#183; lower is better</text>
+<text x="158" y="79.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">nudge-prompt</text>
+<path d="M170,66.0 H713.8260869565217 Q717.8260869565217,66.0 717.8260869565217,70.0 V80.0 Q717.8260869565217,84.0 713.8260869565217,84.0 H170 Z" fill="#898781"/>
+<text x="725.8260869565217" y="79.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">8.2</text>
+<text x="158" y="113.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">baseline</text>
+<path d="M170,100.0 H677.3043478260864 Q681.3043478260864,100.0 681.3043478260864,104.0 V114.0 Q681.3043478260864,118.0 677.3043478260864,118.0 H170 Z" fill="#898781"/>
+<text x="689.3043478260864" y="113.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">7.7</text>
+<text x="158" y="147.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">gaslighter-off</text>
+<path d="M170,134.0 H567.7391304347825 Q571.7391304347825,134.0 571.7391304347825,138.0 V148.0 Q571.7391304347825,152.0 567.7391304347825,152.0 H170 Z" fill="#898781"/>
+<text x="579.7391304347825" y="147.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">6.0</text>
+<text x="158" y="181.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">gaslighter-lite</text>
+<path d="M170,168.0 H531.2173913043478 Q535.2173913043478,168.0 535.2173913043478,172.0 V182.0 Q535.2173913043478,186.0 531.2173913043478,186.0 H170 Z" fill="#898781"/>
+<text x="543.2173913043478" y="181.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">5.5</text>
+<text x="158" y="215.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">gaslighter-full</text>
+<path d="M170,202.0 H239.04347826086928 Q243.04347826086928,202.0 243.04347826086928,206.0 V216.0 Q243.04347826086928,220.0 239.04347826086928,220.0 H170 Z" fill="#3987e5"/>
+<text x="251.04347826086928" y="215.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">1.1</text>
+<line x1="170" y1="54" x2="170" y2="228" stroke="#383835" stroke-width="1"/>
+</svg>

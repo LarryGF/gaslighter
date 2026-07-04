@@ -3,8 +3,9 @@
 three findings docs, appending new appendix rows without rewriting old ones.
 
   python render_findings.py --check              # verify sentinel markers exist
-  python render_findings.py runs/<stamp>          # merge + write the 3 docs
+  python render_findings.py runs/<stamp>          # merge + write the 3 docs + chart SVGs
   python render_findings.py runs/<stamp> --dry-run  # compute + print, write nothing
+  python render_findings.py --chart               # regenerate chart SVGs from the current appendix
 """
 import argparse
 import json
@@ -34,6 +35,18 @@ BLOCK_MARKERS = {
 APPEND_MARKERS = {
     FINDINGS: ["APPENDIX"],
 }
+
+ASSETS = ROOT / "assets"
+
+# One accent for the featured arm, neutral gray for context bars. Identity is
+# carried by the direct arm labels, so the gray is de-emphasis, not a series color.
+CHART_THEMES = {
+    "benchmark.svg": {"accent": "#2a78d6", "neutral": "#898781",
+                      "ink": "#0b0b0b", "ink2": "#52514e", "axis": "#c3c2b7"},
+    "benchmark-dark.svg": {"accent": "#3987e5", "neutral": "#898781",
+                           "ink": "#ffffff", "ink2": "#c3c2b7", "axis": "#383835"},
+}
+CHART_FEATURED_ARM = "gaslighter-full"
 
 
 class RenderError(Exception):
@@ -207,6 +220,55 @@ def compute_run_meta(pooled_rows):
             "runs_per_cell": max(cell_counts.values()) if cell_counts else 0,
         }
     return meta
+
+
+def _chart_svg(bars, theme):
+    """Horizontal bar chart of failures per 100 tasks. bars = [(arm, value)] sorted desc."""
+    font = 'system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif'
+    left, right, top, row_h, bar_h, bottom = 170, 60, 58, 34, 18, 14
+    width = 860
+    height = top + row_h * len(bars) + bottom
+    xmax = max(v for _, v in bars) * 1.15
+    plot_w = width - left - right
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Missed requirements per 100 tasks by arm; {bars[-1][0]} is lowest at {bars[-1][1]:.1f}">',
+        f'<text x="{left}" y="22" font-family="{font}" font-size="15" font-weight="600" '
+        f'fill="{theme["ink"]}">Missed requirements per 100 tasks</text>',
+        f'<text x="{left}" y="41" font-family="{font}" font-size="12.5" '
+        f'fill="{theme["ink2"]}">headless Claude Code sessions, deterministic scoring &#183; lower is better</text>',
+    ]
+    for i, (arm, v) in enumerate(bars):
+        y = top + i * row_h + (row_h - bar_h) / 2
+        w = max(v / xmax * plot_w, 6)
+        color = theme["accent"] if arm == CHART_FEATURED_ARM else theme["neutral"]
+        weight = ' font-weight="600"' if arm == CHART_FEATURED_ARM else ""
+        r = 4
+        parts += [
+            f'<text x="{left - 12}" y="{y + bar_h / 2 + 4.5}" text-anchor="end" '
+            f'font-family="{font}" font-size="13"{weight} fill="{theme["ink2"] if arm != CHART_FEATURED_ARM else theme["ink"]}">{arm}</text>',
+            f'<path d="M{left},{y} H{left + w - r} Q{left + w},{y} {left + w},{y + r} '
+            f'V{y + bar_h - r} Q{left + w},{y + bar_h} {left + w - r},{y + bar_h} H{left} Z" fill="{color}"/>',
+            f'<text x="{left + w + 8}" y="{y + bar_h / 2 + 4.5}" font-family="{font}" '
+            f'font-size="13"{weight} fill="{theme["ink"]}">{v:.1f}</text>',
+        ]
+    parts.append(f'<line x1="{left}" y1="{top - 4}" x2="{left}" y2="{height - bottom}" '
+                 f'stroke="{theme["axis"]}" stroke-width="1"/>')
+    parts.append("</svg>")
+    return "\n".join(parts) + "\n"
+
+
+def render_chart_svgs(headline_agg):
+    bars = sorted(((r["arm"], (1 - r["correct"]) * 100)
+                   for r in headline_agg if r["correct"] is not None),
+                  key=lambda t: -t[1])
+    if not bars:
+        raise RenderError("no correctness data to chart")
+    ASSETS.mkdir(exist_ok=True)
+    for name, theme in CHART_THEMES.items():
+        (ASSETS / name).write_text(_chart_svg(bars, theme), encoding="utf-8")
+    return [ASSETS / name for name in CHART_THEMES]
 
 
 def render_headline_table(pooled_rows):
@@ -502,7 +564,9 @@ def render(run_dir, dry_run=False):
     FINDINGS.write_text(findings_text, encoding="utf-8")
     README.write_text(readme_text, encoding="utf-8")
     EVALS_README.write_text(evals_readme_text, encoding="utf-8")
+    charts = render_chart_svgs(headline_agg)
     print(f"\nwrote {FINDINGS}, {README}, {EVALS_README} ({len(new_rows)} new appendix rows)")
+    print("wrote " + ", ".join(str(c) for c in charts))
 
 
 def main():
@@ -510,13 +574,20 @@ def main():
     ap.add_argument("run_dir", nargs="?", help="run directory (required unless --check)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--check", action="store_true", help="verify sentinel markers exist in the 3 docs")
+    ap.add_argument("--chart", action="store_true", help="regenerate chart SVGs from the current appendix")
     args = ap.parse_args()
 
     if args.check:
         sys.exit(check())
 
+    if args.chart:
+        rows = parse_appendix(FINDINGS.read_text(encoding="utf-8"))
+        charts = render_chart_svgs(render_headline_table(rows))
+        print("wrote " + ", ".join(str(c) for c in charts))
+        return
+
     if not args.run_dir:
-        sys.exit("give a run_dir, or --check")
+        sys.exit("give a run_dir, --chart, or --check")
 
     try:
         render(args.run_dir, dry_run=args.dry_run)
