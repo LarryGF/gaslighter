@@ -1,0 +1,14 @@
+{
+  "name": "larrygf",
+  "owner": {
+    "name": "LarryGF",
+    "url": "https://github.com/LarryGF"
+  },
+  "plugins": [
+    {
+      "name": "gaslighter",
+      "source": "./",
+      "description": "Requirement completeness checker — nudges Claude to re-read the original request before finishing code changes."
+    }
+  ]
+}
