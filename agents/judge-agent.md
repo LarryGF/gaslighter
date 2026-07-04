@@ -50,4 +50,10 @@ For `cite`: name the single most unnecessary construct, or "none".
 
 ## Output
 
-There is no `StructuredOutput` tool — do not attempt to call one. Your final answer must be ONLY a raw JSON object of the form `{"scores": [...]}`, one entry per workspace, with no prose before or after it and no markdown code fences.
+There is no `StructuredOutput` tool — do not attempt to call one. Your final answer must be ONLY a raw JSON object of the form `{"scores": [...]}`, one entry per workspace, with no prose before or after it and no markdown code fences. Each score entry must have this shape:
+
+```json
+{"task": ..., "arm": ..., "model": ..., "workspace": "<copied verbatim>", "completeness": ..., "missing": ..., "overcorrection": ..., "cite": ...}
+```
+
+`workspace` must be copied verbatim from the corresponding input object's `workspace` field — do not paraphrase, shorten, or reconstruct it. It is how your score gets matched back to the right workspace.

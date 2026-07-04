@@ -19,12 +19,9 @@ Where `<stamp>` is a run directory name (e.g., `runs/20260623-1330`).
 
 When invoked with a run directory:
 
-### Step 1: Collect & prep (main session)
+### Step 1: Prep (main session)
 
-1. Run `python3 evals/judge.py --collect evals/runs/<stamp>` — save stdout to a variable (JSON array of workspace objects with `task`, `arm`, `model`, `prompt`, `source`, `workspace` fields)
-2. Read `evals/runs/<stamp>/results.json` for automated scores. Each result entry has a `run` field (int) — build a lookup keyed by `f"{task}__{arm}__{model}__{run}"` to get `complete_rate` per workspace. Match this against each collected workspace's `workspace` field (its basename is `task__arm__model__run`).
-3. Group the collected workspaces by `task` field — you should get ~5 groups
-4. For each task group, write the workspaces (each annotated with its `complete_rate`) to a **pretty-printed** JSON file, e.g. `json.dump(items, f, indent=2)` to `/tmp/judge_input_{task}.json`. Do NOT write single-line/minified JSON — the judge-agent's Read tool truncates very long lines, and a 30-workspace task can be 50-100KB on one line. Pretty-printing with `indent=2` keeps every line short regardless of file size.
+Run `python3 evals/judge.py --prep evals/runs/<stamp>`. This collects workspaces, annotates each with its automated `complete_rate` (looked up from `results.json` by `task__arm__model__run`), groups them by task, and writes a pretty-printed `evals/runs/<stamp>/judge_input/<task>.json` per task. It prints a manifest to stdout: `{task: {path, count, workspaces}}` — use this to know what to fan out in Step 2 and how many/which workspaces each task's agent is expected to return in Step 3.
 
 ### Step 2: Fan out (parallel sub-agents)
 
@@ -38,7 +35,7 @@ Agent prompt — point at the file, do not inline the JSON (it's too large for a
 ```
 Judge the following workspaces for task "{task_id}":
 
-RAW_JSON_INPUT_PATH: /tmp/judge_input_{task_id}.json
+RAW_JSON_INPUT_PATH: evals/runs/<stamp>/judge_input/{task_id}.json
 
 This file is pretty-printed JSON — a single Read call with no offset/limit gives you the ENTIRE file in one shot. It is a JSON array of exactly {n} workspace objects, each with `task`, `arm`, `model`, `prompt`, `source`, `workspace`, and `complete_rate` fields.
 
@@ -52,6 +49,7 @@ There is no "StructuredOutput" tool available — do not attempt to call one. Ou
       "task": "{task_id}",
       "arm": "<arm from the workspace object>",
       "model": "<model from the workspace object>",
+      "workspace": "<workspace value copied verbatim from the input object>",
       "completeness": <integer 0-3>,
       "missing": "<string>",
       "overcorrection": <integer 0-3>,
@@ -62,22 +60,17 @@ There is no "StructuredOutput" tool available — do not attempt to call one. Ou
 }
 ```
 
+`workspace` must be copied verbatim from the input object — do not paraphrase or shorten it. It's how the merge step matches a score back to the workspace it belongs to.
+
 Note: this skill is invoked via the interactive `Agent` tool, not a Workflow script — there is no `schema` parameter and no automatic `StructuredOutput` tool injection. The agent must be told explicitly to emit plain JSON as its final text; the prompt above does this.
 
-### Step 3: Merge & write (main session)
+### Step 3: Merge (main session)
 
 1. From each agent's final text, extract the JSON object (agents may still wrap it in a code fence or add a sentence before/after despite instructions — find the outermost `{...}` and parse it; if parsing fails, retry that one agent rather than guessing at its output)
-2. Verify each task's scores array has the expected count (matches the number of workspaces sent) — if short, some workspaces were skipped or fabricated; relaunch that agent with an explicit reminder of the expected count rather than accepting a partial/padded result
-3. Filter out any null results (from failed agents)
-4. Merge into a single `scores` array
-5. Write `evals/runs/<stamp>/judge.json`:
-   ```json
-   {
-     "scores": [...]
-   }
-   ```
-6. Run `python3 evals/judge.py --summarize evals/runs/<stamp>` to print aggregate stats
-7. Display a markdown results table:
+2. Write each task's parsed JSON to `evals/runs/<stamp>/judge_input/<task>.scores.json`
+3. Run `python3 evals/judge.py --merge evals/runs/<stamp>`. It matches scores to expected workspaces by name (not position), merges into `judge.json` (per-task overwrite by name, so re-running is safe), and calls the existing summarizer.
+4. If it exits nonzero, it printed specific missing/duplicate workspace names per task on stderr. Relaunch only the implicated task's agent (Step 2, scoped to that one task), write its scores file again, and re-run `--merge` — already-merged tasks are untouched.
+5. Once `--merge` exits 0, display a markdown results table:
 
 ```
 | Task | Arm | n | Completeness (mean) | Overcorrection (mean) |
@@ -85,22 +78,13 @@ Note: this skill is invoked via the interactive `Agent` tool, not a Workflow scr
 | ...  | ... | . | ...                | ...                   |
 ```
 
-### Step 4: Enrich the docs (main session)
+### Step 4: Render findings (main session)
 
-After every judged run, update these three files so they always reflect the latest findings — do this automatically, don't wait to be asked:
+Run `python3 evals/render_findings.py evals/runs/<stamp>`. This updates the auto-generated regions of `docs/eval-findings.md`, `README.md`, and `evals/README.md` in place — the headline table, per-task table, intro paragraph, sample-size note, missing-metrics note, and README/evals-README leader/premium sentence are all recomputed from `results.json` + `judge.json` and spliced into sentinel-marked regions; new appendix rows are appended to `docs/eval-findings.md`, existing appendix rows are never rewritten.
 
-- `README.md` (top-level `## Results` section)
-- `evals/README.md` (`## Results` section)
-- `docs/eval-findings.md` (the full findings doc)
+Read its printed before/after delta table, then hand-update **only** the `## Key findings` section of `docs/eval-findings.md` using those deltas — that section is interpretive and intentionally left out of automatic rendering. Also touch the "Note on hook version" paragraph only if this run's hook version differs from the last merged run in a materially relevant way (same judgment call as before).
 
-**Merge, don't replace.** `docs/eval-findings.md` accumulates across runs — each new judged run gets folded into the existing findings, not swapped in on top of them. To do this:
-
-1. Read the current `docs/eval-findings.md` and recover its underlying per-row data. If it already has a "Full per-run table" appendix, that table IS the source of truth for prior runs — parse it back into rows (it already has a `Run Stamp` column for exactly this purpose). If this is the first-ever judged run, there's nothing to merge; skip to step 3.
-2. Combine those prior rows with this run's rows (`task`, `arm`, `model`, a per-cell run index, `correct`, `complete_rate`, `completeness`, `overcorrection`, `turns`, `cost`, `missing`, `cite`), tagging each new row with this run's stamp so the appendix stays traceable to its source run per-row.
-3. Recompute every aggregate from the combined row set — overall by-arm headline table, and per-task by-arm table — with the resulting `n` per arm/task reflecting the true pooled cell count (arms/tasks only present in one run keep that run's `n`; arms/tasks in both runs sum their `n`). Never hand-average two runs' published means — recompute from the pooled raw rows, since runs can have different cell counts per arm and a naive mean-of-means silently misweights them.
-4. Rewrite `docs/eval-findings.md`: setup section (list every run stamp folded in, and what cell counts/tasks each contributed), the merged headline table, key findings (re-derive from the merged numbers — don't just keep old prose that a merge may have invalidated), the merged per-task table, methodology notes, then the appended full per-run table (every prior run's rows plus this run's, each tagged with its `Run Stamp`).
-5. Update the `## Results` table in `README.md` and `evals/README.md` to match the new merged headline table, and update their cell-count/run-stamp descriptions accordingly.
-6. If this run used a plugin/hook version that differs from a previously-merged run in a way that would materially change turn/cost behavior (e.g. an anti-loop or nudge-logic fix landed between runs), call this out explicitly in a "Note on hook version" callout — don't silently blend numbers from different hook behaviors without flagging it.
+If `render_findings.py` exits 2, this run's stamp is already in the appendix — nothing to do, not an error. If it exits 1, it printed the specific problem (missing sentinel marker, missing input file, or a join that produced zero usable rows) — fix that before retrying.
 
 ## Error handling
 
@@ -108,5 +92,5 @@ After every judged run, update these three files so they always reflect the late
 - **Missing run directory**: Validate path exists, suggest `ls evals/runs/` to find correct timestamp
 - **No workspaces collected**: Report error, suggest checking run directory contents
 - **Agent returns null**: Log warning, continue with remaining agents' results
-- **Agent returns fewer scores than workspaces sent, or a suspicious pattern of duplicate entries**: Treat as a failed judgment, not a partial success — relaunch that task's agent rather than merging the incomplete/fabricated result
+- **`judge.py --merge` exits nonzero**: it reports missing or duplicate workspaces by name, per task, on stderr — relaunch only the implicated task's agent (not all of them) and re-run `--merge`.
 - **Partial run**: Some workspaces may be missing — log count of skipped
