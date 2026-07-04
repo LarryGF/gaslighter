@@ -17,7 +17,10 @@ Headless Claude Code sessions on tasks built around the ways models actually dro
 
 ## What it looks like
 
-Say you ask for a webhook handler: accept a URL and payload, format messages like the other handlers do, handle errors the same way, and make it available when the package is imported.
+Say you ask for a webhook handler: 
+```
+Accept a URL and payload, format messages like the other handlers do, handle errors the same way, and make it available when the package is imported.
+```
 
 Without gaslighter, Claude writes a clean `webhook_handler.py` and declares victory. It never touches `__init__.py`. The handler exists, the package doesn't export it, and that last requirement was sitting right there in the prompt. This is the single most common miss in our eval data, by a wide margin.
 
