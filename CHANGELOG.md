@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0] - 2026-07-04
+
+### Added
+
+- **Modes are back**: `lite` (non-blocking `additionalContext` nudge, default), `full` (hard `decision: "block"`), `off` — both delivered via stdout + exit 0 per the Stop hook JSON protocol.
+- **Confidence escape hatch**: after the first nudge, if the model's last turn declares "100% certain/confident/sure" (read from `transcript_path`), the hook stops nudging immediately.
+- **Persisted config**: mode and nudge cap stored in `${CLAUDE_PLUGIN_DATA}/config.json` via the `gaslighter:config` skill and `gaslighter-config-cli.js`; `GASLIGHTER_MODE` / `GASLIGHTER_MAX_NUDGES` env vars override per session.
+- **LLM judge pipeline**: `gaslighter:judge` skill fans out one `judge-agent` per task to rate completeness and overcorrection; `evals/render_findings.py` regenerates all results tables from run data.
+- **Eval suite expanded** to 5 arms (baseline, gaslighter-off/lite/full, nudge-prompt); findings merged across 6 runs (910 cells).
+- `.claude-plugin/marketplace.json` — install via `claude plugin marketplace add LarryGF/gaslighter`.
+
+### Fixed
+
+- Race reading `transcript_path` before the harness finished flushing the turn, which broke the escape hatch.
+
+### Removed
+
+- Orphaned statusline scripts, unused `scripts/load.py` router, and `evals/inspect.sh`.
+
+---
+
 ## [1.0.0] - 2026-06-29
 
 ### Summary
