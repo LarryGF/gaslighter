@@ -35,8 +35,17 @@ process.stdin.on('end', function () {
     var isFirst = (state.nudge_count || 0) === 0;
 
     if (!isFirst) {
-      var turn = analyzeLastTurn(payload.transcript_path);
-      if (turn && confidenceDeclared(turn.text)) {
+      var turn = waitForTurn(payload.transcript_path, parseInt(process.env.GASLIGHTER_FLUSH_WAIT_MS, 10) || 5000);
+      // Couldn't observe a fully-flushed turn in time: stay quiet. Nudging
+      // blind is what caused infinite full-mode loops (observed live: the
+      // harness flushes the final text entry ~200ms AFTER the Stop hook
+      // starts, so an unwaited read sees the previous turn or nothing).
+      if (!turn) {
+        debugLog('exit_flush_timeout', { nudge_count: state.nudge_count, session: sessionId });
+        saveState(state, sessionId);
+        process.exit(0);
+      }
+      if (confidenceDeclared(turn.text)) {
         debugLog('exit_confidence_declared', { nudge_count: state.nudge_count, session: sessionId });
         saveState(state, sessionId);
         process.exit(0);
@@ -44,7 +53,7 @@ process.stdin.on('end', function () {
       // Model answered a nudge without a single tool call: it re-checked and
       // changed nothing, so another identical nudge is pure noise. Stop here
       // regardless of how the model phrased its confirmation.
-      if (turn && !turn.usedTools) {
+      if (!turn.usedTools) {
         debugLog('exit_no_tool_activity', { nudge_count: state.nudge_count, session: sessionId });
         saveState(state, sessionId);
         process.exit(0);
@@ -112,44 +121,24 @@ function confidenceDeclared(text) {
   return CONFIDENCE_RE.test(text || '');
 }
 
-// Stop hooks can fire before the harness finishes flushing the just-completed
-// turn to transcript_path. A single read can observe a stale (previous-turn)
-// version of the file, which broke the escape hatch below. Re-read after a
-// short wait and keep the longest version seen — a completed flush only ever
-// grows the file, so the longest read is the most complete one available.
 function sleepSync(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (e) {}
 }
 
-function readStable(transcriptPath) {
-  // Observed live: a 40ms window lost the race and the hook nudged past a
-  // "100% certain" turn. Widen to ~620ms worst case with doubling backoff,
-  // bailing once the file stops growing after at least 3 reads (~60ms).
-  var best = '';
-  var prevLen = -1;
-  for (var i = 0; i < 6; i++) {
-    if (i > 0) sleepSync(20 << (i - 1));
-    var content;
-    try { content = fs.readFileSync(transcriptPath, 'utf8'); } catch (e) { continue; }
-    if (content.length > best.length) best = content;
-    if (i >= 2 && content.length === prevLen) break;
-    prevLen = content.length;
-  }
-  return best;
-}
-
 // Walks the last assistant turn (everything back to the previous real user
 // message; tool_result entries belong to the turn) and reports its combined
-// text plus whether any tool was called. Returns null when the transcript is
-// missing/unreadable or holds no assistant entry — callers must treat null as
-// "unknown", not as "no tool activity", so a flaky read can't kill nudging.
+// text, whether any tool was called, and whether the turn looks fully flushed
+// (its newest entry is an assistant text entry — the harness writes the final
+// text entry last). Returns null when the transcript is missing/unreadable or
+// holds no assistant entry.
 function analyzeLastTurn(transcriptPath) {
   if (!transcriptPath) return null;
   var lines;
-  try { lines = readStable(transcriptPath).split('\n'); } catch (e) { return null; }
+  try { lines = fs.readFileSync(transcriptPath, 'utf8').split('\n'); } catch (e) { return null; }
   var texts = [];
   var usedTools = false;
   var sawAssistant = false;
+  var complete = false;
   for (var i = lines.length - 1; i >= 0; i--) {
     var line = lines[i].trim();
     if (!line) continue;
@@ -158,15 +147,19 @@ function analyzeLastTurn(transcriptPath) {
     if (!entry.message || !entry.message.content) continue;
     var content = entry.message.content;
     if (entry.type === 'assistant') {
-      sawAssistant = true;
-      if (typeof content === 'string' && content) texts.unshift(content);
+      var hasText = false;
+      if (typeof content === 'string' && content) { texts.unshift(content); hasText = true; }
       if (Array.isArray(content)) {
         content.forEach(function (c) {
           if (!c) return;
-          if (c.type === 'text' && c.text) texts.unshift(c.text);
+          if (c.type === 'text' && c.text) { texts.unshift(c.text); hasText = true; }
           if (c.type === 'tool_use') usedTools = true;
         });
       }
+      // The newest assistant entry decides flush state: a trailing tool_use
+      // or thinking entry means the final text hasn't been written yet.
+      if (!sawAssistant) complete = hasText;
+      sawAssistant = true;
     } else if (entry.type === 'user') {
       var isToolResult = Array.isArray(content) && content.some(function (c) {
         return c && c.type === 'tool_result';
@@ -175,7 +168,20 @@ function analyzeLastTurn(transcriptPath) {
     }
   }
   if (!sawAssistant) return null;
-  return { text: texts.join('\n'), usedTools: usedTools };
+  return { text: texts.join('\n'), usedTools: usedTools, complete: complete };
+}
+
+// The harness flushes the turn's final text entry to transcript_path AFTER
+// the Stop hook starts (measured live: ~200ms). Poll until the last turn is
+// fully flushed; null on timeout — callers must fail quiet, never nudge blind.
+function waitForTurn(transcriptPath, deadlineMs) {
+  var start = Date.now();
+  while (true) {
+    var turn = analyzeLastTurn(transcriptPath);
+    if (turn && turn.complete) return turn;
+    if (Date.now() - start >= deadlineMs) return null;
+    sleepSync(150);
+  }
 }
 
 // Back-compat helper: text of the last assistant turn.
@@ -231,7 +237,7 @@ function saveConfig(cfg) {
 // Exported for testing
 if (typeof module !== 'undefined') {
   module.exports = {
-    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, analyzeLastTurn, readStable,
+    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, analyzeLastTurn, waitForTurn,
     loadConfig, saveConfig, getConfigPath, getMaxNudges, MODE_DEFAULT_MAX
   };
 }
