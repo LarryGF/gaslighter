@@ -239,6 +239,14 @@ test('lastAssistantText: returns text of most recent assistant turn', function (
   assert.strictEqual(nudge.lastAssistantText(p), 'I am 100% certain.');
 });
 
+test('lastAssistantText: skips trailing tool-call-only entry, falls back to prior text', function () {
+  var p = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I am 100% certain.' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }
+  ]);
+  assert.strictEqual(nudge.lastAssistantText(p), 'I am 100% certain.');
+});
+
 test('lastAssistantText: returns empty string for missing path', function () {
   assert.strictEqual(nudge.lastAssistantText(undefined), '');
   assert.strictEqual(nudge.lastAssistantText('/no/such/file.jsonl'), '');

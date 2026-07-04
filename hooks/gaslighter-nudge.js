@@ -135,11 +135,13 @@ function lastAssistantText(transcriptPath) {
       try { entry = JSON.parse(line); } catch (e) { continue; }
       if (entry.type === 'assistant' && entry.message && entry.message.content) {
         var content = entry.message.content;
-        if (typeof content === 'string') return content;
+        if (typeof content === 'string' && content) return content;
         if (Array.isArray(content)) {
-          return content.filter(function (c) { return c && c.type === 'text'; })
+          var text = content.filter(function (c) { return c && c.type === 'text'; })
             .map(function (c) { return c.text; }).join('\n');
+          if (text) return text;
         }
+        // Entry had no text (e.g. tool-call-only) — keep scanning further back.
       }
     }
   } catch (e) {}
