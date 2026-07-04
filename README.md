@@ -1,68 +1,45 @@
 # Gaslighter
 
-A Claude Code plugin that nudges the model to verify requirement completeness before finishing code changes.
+A Claude Code plugin that catches Claude at the exact moment it thinks it's finished, and makes it doubt itself just enough to go back and re-read what you actually asked for.
 
-## What It Does
+![Works with Claude Code](https://img.shields.io/badge/works%20with-Claude%20Code-111111?style=flat-square) ![MIT license](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 
-Each time Claude tries to finish a response, a Stop hook fires a "re-read the original request" nudge. The model must genuinely re-examine requirements before continuing — not just say "yes I checked."
+You write five requirements. Claude implements four, says "Done!", and means it. The fifth one was in the middle of your second paragraph, and nothing errors, so you find out in review. Or in production. That's the failure this plugin exists for, and it's measurable:
 
-Anti-loop guard: at most one nudge per stop, capped per session (3 by default in `lite`, unlimited in `full`, 0 in `off`). First nudge forces re-examination; subsequent nudges include an escape hatch.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/benchmark-dark.svg">
+    <img src="assets/benchmark.svg" width="860" alt="Missed requirements per 100 tasks by arm. nudge-prompt 8.2, baseline 7.7, gaslighter-off 6.0, gaslighter-lite 5.5, gaslighter-full 1.1.">
+  </picture>
+</p>
 
-## Install
+Headless Claude Code sessions on tasks built around the ways models actually drop requirements, scored deterministically. Full numbers below; the catch — `full` mode spends ~45% more turns getting there — is covered there too.
 
-Add this repo as a marketplace, then install the plugin:
+## What it looks like
 
-```bash
-claude plugin marketplace add LarryGF/gaslighter
-claude plugin install gaslighter@larrygf
-```
+Say you ask for a webhook handler: accept a URL and payload, format messages like the other handlers do, handle errors the same way, and make it available when the package is imported.
 
-Or, from a local clone (for development):
+Without gaslighter, Claude writes a clean `webhook_handler.py` and declares victory. It never touches `__init__.py`. The handler exists, the package doesn't export it, and that last requirement was sitting right there in the prompt. This is the single most common miss in our eval data, by a wide margin.
 
-```bash
-claude --plugin-dir /path/to/gaslighter
-```
+With gaslighter, just as Claude tries to finish:
 
-## How It Works
+> Hold on — are you absolutely sure you've addressed every single requirement from the original request? Don't just assume you did. Go back, re-read what was asked, and confirm each point is actually implemented. If anything is missing, fix it now.
 
-**Stop** — when Claude tries to finish, fires a completeness nudge. Mode controls delivery:
+Claude re-reads the request, catches "available alongside the existing handlers", and registers the handler before finishing.
 
-- `lite` (default) — non-blocking soft nudge via `additionalContext`, up to 3 nudges/session
-- `full` — hard block via `decision: "block"`, unlimited nudges
-- `off` — disabled
+## How it works
 
-Mode and nudge cap persist to `${CLAUDE_PLUGIN_DATA}/config.json` via the `gaslighter:config` skill (`/gaslighter:config`), so they don't need to be re-set every session. Precedence: env var > persisted config > mode default.
+Each time Claude tries to finish a response, a [Stop hook](https://code.claude.com/docs/en/hooks) fires and asks it to re-verify the original request against what it actually did. It's built not to become a nag loop: one nudge per stop, a session cap, and an escape hatch — once Claude re-reads and declares it's 100% certain everything is covered, the nudging stops for the session.
 
-### Disabling
+| Mode | Delivery | Default cap |
+|------|----------|-------------|
+| `lite` (default) | Soft nudge, Claude can still finish | 3 / session |
+| `full` | Hard block, Claude can't finish until it re-verifies | unlimited |
+| `off` | Hook exits silently | 0 |
 
-Persist it: run `/gaslighter:config` and pick `off`.
+## The numbers
 
-Or override for one session without touching the persisted config:
-
-```bash
-export GASLIGHTER_MODE=off
-```
-
-`GASLIGHTER_MAX_NUDGES` similarly overrides the persisted/default nudge cap for one session (a positive integer, or `infinite`/`unlimited`/`-1`).
-
-## Eval Suite
-
-```bash
-cd evals
-
-# Validate scorers (no API spend)
-python3 run.py --selftest
-
-# Quick run
-python3 run.py --task hard-buried-constraints --models haiku --runs 1
-
-# Full run
-python3 run.py --all --runs 4
-```
-
-See `evals/README.md` for task details and judging.
-
-## Results
+The chart up top comes from real agent sessions, not single prompts: headless Claude Code runs coding tasks engineered around requirement-dropping failure modes — buried constraints, conventions that live in the code instead of the prompt, changes that cascade across files. Every workspace gets scored by deterministic code checks plus an independent LLM judge. The chart and the table below regenerate straight from the eval data, so they can't drift from what was measured.
 
 <!-- RENDER:RESULTS_TABLE:START — auto-generated by evals/render_findings.py, do not hand-edit -->
 Merged across 6 eval runs (910 cells total: 5 tasks × 5 arms × 2 models, 8, 3, 3, 3, 3, 3 runs/cell across the runs):
@@ -80,4 +57,95 @@ Merged across 6 eval runs (910 cells total: 5 tasks × 5 arms × 2 models, 8, 3,
 `gaslighter-full` leads on every quality metric — correctness, completion, and judged completeness — at a ~45% turn/cost premium over `baseline`.
 <!-- RENDER:RESULTS_PROSE:END -->
 
-Full findings and all 910 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).
+Here's the part worth slowing down on: the `nudge-prompt` arm bakes the same "re-read and verify" advice into the system prompt instead of a hook, and it scores *worse than doing nothing*. The words aren't what works. The interruption is — it lands at the exact moment Claude tries to stop, when the request is cold and the miss is already sitting in the diff.
+
+The trade is real, though. `full` mode spends roughly 45% more turns than baseline, because re-checking is the whole point. If a silently missed requirement costs you more than half an agent invocation, that math works for you. And no, it doesn't nag Claude into gold-plating: the judge's overcorrection score barely moves.
+
+Method, per-task breakdowns, every individual score, and the limitations (single LLM judge, one mid-run hook fix in the merged data): [docs/eval-findings.md](docs/eval-findings.md). Or run it yourself: [evals/](evals/).
+
+## Install
+
+In Claude Code, as two separate prompts:
+
+```
+/plugin marketplace add LarryGF/gaslighter
+```
+```
+/plugin install gaslighter@larrygf
+```
+
+Or from the command line:
+
+```bash
+claude plugin marketplace add LarryGF/gaslighter
+claude plugin install gaslighter@larrygf
+```
+
+The hook is a tiny Node.js script, so `node` needs to be on your PATH. If it isn't, the plugin stays quiet instead of erroring on every stop.
+
+Working on gaslighter itself? Run against a local clone without installing:
+
+```bash
+claude --plugin-dir /path/to/gaslighter
+```
+
+### Configure
+
+Run `/gaslighter:config` once, pick a mode and nudge cap, and it persists across sessions. To override for a single session without touching that:
+
+```bash
+export GASLIGHTER_MODE=full        # off / lite / full
+export GASLIGHTER_MAX_NUDGES=5     # a number, or infinite / unlimited / -1
+```
+
+Env var beats persisted config beats mode default, for mode and cap independently.
+
+### Uninstall
+
+```
+/plugin remove gaslighter
+```
+
+That leaves the persisted config and session state behind in `~/.claude/plugins/data/gaslighter/` — delete that directory to remove every trace.
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `/gaslighter` | Routes to the sub-commands below; with no argument, asks what you want |
+| `/gaslighter:config` | Set mode and nudge cap, persisted across sessions |
+| `/gaslighter:eval` | Run the benchmark suite |
+| `/gaslighter:judge runs/<stamp>` | LLM-judge a completed eval run |
+
+## Development
+
+```bash
+node tests/test-nudge-decision.js   # unit tests for the hook logic
+
+cd evals
+python3 run.py --selftest           # validate scorers against reference solutions, no API spend
+python3 run.py --all --runs 4       # full eval run
+```
+
+`run.py` refuses to spend API money if the selftest fails, and verifies per cell that the hook actually fired where it should have. After judging, `render_findings.py` regenerates the findings doc, the results table above, and the chart — details in [evals/README.md](evals/README.md).
+
+## FAQ
+
+**Isn't "gaslighting" the model a bad thing?**
+The nudge never lies. Every requirement it asks Claude to re-check was really in your request — it just refuses to accept "done" at face value.
+
+**Won't it loop forever?**
+No. One nudge per stop, a per-session cap, and an escape hatch once Claude declares 100% certainty after actually re-reading.
+
+**Why not just put "double-check your work" in the system prompt?**
+We tested exactly that. It scored below doing nothing. Timing beats wording.
+
+**Is `full` worth 45% more turns?**
+Depends what a missed requirement costs you. Shipping code: probably yes. Throwaway exploration: use `lite`, or turn it off.
+
+**Does it fire on non-coding turns?**
+Right now it fires whenever Claude tries to finish, coding or not, up to the cap. Gating it on actual file edits is on the roadmap.
+
+## License
+
+[MIT](LICENSE).
