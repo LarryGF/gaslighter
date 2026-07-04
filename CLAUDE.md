@@ -4,7 +4,7 @@ Claude Code plugin that uses a Stop hook to nudge Claude into verifying requirem
 
 ## How It Works
 
-Each time Claude tries to finish a response, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; after that the hook stops early (before the cap) when the model's last turn (read from `transcript_path`) shows it has nothing left to do: either it declares "100% certain/confident/sure" (regex fast-path), or the turn contained zero tool calls — meaning it re-checked and changed nothing, so further nudging is noise no matter how the confirmation is phrased. An unreadable/missing transcript counts as unknown and keeps nudging.
+Each time Claude tries to finish a response, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; after that the hook stops early (before the cap) when the model's last turn shows it has nothing left to do: either it declares "100% certain/confident/sure" (regex fast-path), or the turn contained zero tool calls — meaning it re-checked and changed nothing, so further nudging is noise no matter how the confirmation is phrased. The harness flushes the turn's final text entry to `transcript_path` ~200ms *after* the Stop hook starts, so the hook polls via `waitForTurn()` (150ms interval, 5s deadline, `GASLIGHTER_FLUSH_WAIT_MS` override) until the turn is fully flushed before judging it; on timeout it fails quiet — it never nudges blind.
 
 ## Modes
 
