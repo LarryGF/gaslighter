@@ -80,7 +80,7 @@ Note: this skill is invoked via the interactive `Agent` tool, not a Workflow scr
 
 ### Step 4: Render findings (main session)
 
-Run `python3 evals/render_findings.py evals/runs/<stamp>`. This updates the auto-generated regions of `docs/eval-findings.md`, `README.md`, and `evals/README.md` in place — the headline table, per-task table, intro paragraph, sample-size note, missing-metrics note, and README/evals-README leader/premium sentence are all recomputed from `results.json` + `judge.json` and spliced into sentinel-marked regions; new appendix rows are appended to `docs/eval-findings.md`, existing appendix rows are never rewritten.
+Run `python3 evals/render_findings.py evals/runs/<stamp>`. This updates the auto-generated regions of `docs/eval-findings.md`, `README.md`, and `evals/README.md` in place — the headline table, per-task table, intro paragraph, sample-size note, missing-metrics note, and README/evals-README leader/premium sentence are all recomputed from `results.json` + `judge.json` and spliced into sentinel-marked regions; new appendix rows are appended to `docs/eval-findings.md`, existing appendix rows are never rewritten. It also regenerates the README benchmark chart (`assets/benchmark.svg` + `assets/benchmark-dark.svg`) from the merged data.
 
 Read its printed before/after delta table, then hand-update **only** the `## Key findings` section of `docs/eval-findings.md` using those deltas — that section is interpretive and intentionally left out of automatic rendering. Also touch the "Note on hook version" paragraph only if this run's hook version differs from the last merged run in a materially relevant way (same judgment call as before).
 
