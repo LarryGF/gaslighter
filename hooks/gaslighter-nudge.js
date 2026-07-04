@@ -34,10 +34,21 @@ process.stdin.on('end', function () {
 
     var isFirst = (state.nudge_count || 0) === 0;
 
-    if (!isFirst && confidenceDeclared(lastAssistantText(payload.transcript_path))) {
-      debugLog('exit_confidence_declared', { nudge_count: state.nudge_count, session: sessionId });
-      saveState(state, sessionId);
-      process.exit(0);
+    if (!isFirst) {
+      var turn = analyzeLastTurn(payload.transcript_path);
+      if (turn && confidenceDeclared(turn.text)) {
+        debugLog('exit_confidence_declared', { nudge_count: state.nudge_count, session: sessionId });
+        saveState(state, sessionId);
+        process.exit(0);
+      }
+      // Model answered a nudge without a single tool call: it re-checked and
+      // changed nothing, so another identical nudge is pure noise. Stop here
+      // regardless of how the model phrased its confirmation.
+      if (turn && !turn.usedTools) {
+        debugLog('exit_no_tool_activity', { nudge_count: state.nudge_count, session: sessionId });
+        saveState(state, sessionId);
+        process.exit(0);
+      }
     }
 
     state.nudge_count = (state.nudge_count || 0) + 1;
@@ -111,41 +122,66 @@ function sleepSync(ms) {
 }
 
 function readStable(transcriptPath) {
+  // Observed live: a 40ms window lost the race and the hook nudged past a
+  // "100% certain" turn. Widen to ~620ms worst case with doubling backoff,
+  // bailing once the file stops growing after at least 3 reads (~60ms).
   var best = '';
-  for (var i = 0; i < 3; i++) {
-    if (i > 0) sleepSync(20);
+  var prevLen = -1;
+  for (var i = 0; i < 6; i++) {
+    if (i > 0) sleepSync(20 << (i - 1));
     var content;
     try { content = fs.readFileSync(transcriptPath, 'utf8'); } catch (e) { continue; }
     if (content.length > best.length) best = content;
+    if (i >= 2 && content.length === prevLen) break;
+    prevLen = content.length;
   }
   return best;
 }
 
-// Reads the last assistant turn's text from the Stop hook's transcript_path,
-// so we can tell whether the model already used the escape hatch offered by
-// SUBSEQUENT_NUDGE before firing another nudge.
-function lastAssistantText(transcriptPath) {
-  if (!transcriptPath) return '';
-  try {
-    var lines = readStable(transcriptPath).split('\n');
-    for (var i = lines.length - 1; i >= 0; i--) {
-      var line = lines[i].trim();
-      if (!line) continue;
-      var entry;
-      try { entry = JSON.parse(line); } catch (e) { continue; }
-      if (entry.type === 'assistant' && entry.message && entry.message.content) {
-        var content = entry.message.content;
-        if (typeof content === 'string' && content) return content;
-        if (Array.isArray(content)) {
-          var text = content.filter(function (c) { return c && c.type === 'text'; })
-            .map(function (c) { return c.text; }).join('\n');
-          if (text) return text;
-        }
-        // Entry had no text (e.g. tool-call-only) — keep scanning further back.
+// Walks the last assistant turn (everything back to the previous real user
+// message; tool_result entries belong to the turn) and reports its combined
+// text plus whether any tool was called. Returns null when the transcript is
+// missing/unreadable or holds no assistant entry — callers must treat null as
+// "unknown", not as "no tool activity", so a flaky read can't kill nudging.
+function analyzeLastTurn(transcriptPath) {
+  if (!transcriptPath) return null;
+  var lines;
+  try { lines = readStable(transcriptPath).split('\n'); } catch (e) { return null; }
+  var texts = [];
+  var usedTools = false;
+  var sawAssistant = false;
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    var entry;
+    try { entry = JSON.parse(line); } catch (e) { continue; }
+    if (!entry.message || !entry.message.content) continue;
+    var content = entry.message.content;
+    if (entry.type === 'assistant') {
+      sawAssistant = true;
+      if (typeof content === 'string' && content) texts.unshift(content);
+      if (Array.isArray(content)) {
+        content.forEach(function (c) {
+          if (!c) return;
+          if (c.type === 'text' && c.text) texts.unshift(c.text);
+          if (c.type === 'tool_use') usedTools = true;
+        });
       }
+    } else if (entry.type === 'user') {
+      var isToolResult = Array.isArray(content) && content.some(function (c) {
+        return c && c.type === 'tool_result';
+      });
+      if (!isToolResult) break; // real user message = turn boundary
     }
-  } catch (e) {}
-  return '';
+  }
+  if (!sawAssistant) return null;
+  return { text: texts.join('\n'), usedTools: usedTools };
+}
+
+// Back-compat helper: text of the last assistant turn.
+function lastAssistantText(transcriptPath) {
+  var turn = analyzeLastTurn(transcriptPath);
+  return turn ? turn.text : '';
 }
 
 
@@ -195,7 +231,7 @@ function saveConfig(cfg) {
 // Exported for testing
 if (typeof module !== 'undefined') {
   module.exports = {
-    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, readStable,
+    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, analyzeLastTurn, readStable,
     loadConfig, saveConfig, getConfigPath, getMaxNudges, MODE_DEFAULT_MAX
   };
 }
