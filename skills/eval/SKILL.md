@@ -27,7 +27,9 @@ Runs the gaslighter evaluation suite using `evals/run.py`:
 
 **Experimental arms**:
 - `baseline` — No plugin (control)
-- `gaslighter` — Plugin via `--plugin-dir` (hook-based nudging)
+- `gaslighter-off` — Plugin loaded via `--plugin-dir` but disabled (measures plugin overhead)
+- `gaslighter-lite` — Plugin with soft non-blocking nudge
+- `gaslighter-full` — Plugin with hard-blocking nudge
 - `nudge-prompt` — Static system prompt (non-hook nudging)
 
 **Task types** (all from `tasks_hard.py`):
@@ -59,7 +61,7 @@ When invoked:
 
 1. **Parse arguments**: Extract flags from user input (default to config.json values if not specified)
 
-2. **Build command**: `cd ~/Documents/GitHub/gaslighter/evals && python3 run.py {args}`
+2. **Build command**: `cd "${CLAUDE_PLUGIN_ROOT}/evals" && python3 run.py {args}`
 
 3. **Determine execution mode**:
    - If `--selftest`: run foreground (fast, <10s)
@@ -68,7 +70,7 @@ When invoked:
 4. **Launch task**:
    ```
    Bash({
-     command: "cd ~/Documents/GitHub/gaslighter/evals && python3 run.py {args}",
+     command: "cd "${CLAUDE_PLUGIN_ROOT}/evals" && python3 run.py {args}",
      run_in_background: true,  // false if --selftest
      description: "Run gaslighter eval suite"
    })
@@ -83,7 +85,7 @@ When invoked:
 
 6. **On completion**: Extract the run timestamp from the eval output, print the automated score summary, then chain into judging:
    ```
-   Bash({ command: "cd ~/Documents/GitHub/gaslighter/evals && python3 analyze.py summary runs/{timestamp}" })
+   Bash({ command: "cd "${CLAUDE_PLUGIN_ROOT}/evals" && python3 analyze.py summary runs/{timestamp}" })
    Skill({ skill: "gaslighter:judge", args: "runs/{timestamp}" })
    ```
    `analyze.py summary` reads `summary.json` (complete_rate, correct_rate, turns, cost per task/arm/model) — free, no API spend — and gives the user a quick read before the judge skill spends tokens on LLM scoring. Do NOT tell the user to run judge manually — always chain automatically.

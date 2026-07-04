@@ -4,19 +4,28 @@ A Claude Code plugin that nudges the model to verify requirement completeness be
 
 ## What It Does
 
-When Claude uses Write or Edit tools, a Stop hook fires a "re-read the original request" nudge. The model must genuinely re-examine requirements before continuing — not just say "yes I checked."
+Each time Claude tries to finish a response, a Stop hook fires a "re-read the original request" nudge. The model must genuinely re-examine requirements before continuing — not just say "yes I checked."
 
-Anti-loop guard: max 1 nudge per turn, capped per session (3 by default in `lite`, unlimited in `full`, 0 in `off`). First nudge forces re-examination; subsequent nudges include an escape hatch.
+Anti-loop guard: at most one nudge per stop, capped per session (3 by default in `lite`, unlimited in `full`, 0 in `off`). First nudge forces re-examination; subsequent nudges include an escape hatch.
 
 ## Install
 
+Add this repo as a marketplace, then install the plugin:
+
 ```bash
-claude plugin add /path/to/gaslighter
+claude plugin marketplace add LarryGF/gaslighter
+claude plugin install gaslighter@larrygf
+```
+
+Or, from a local clone (for development):
+
+```bash
+claude --plugin-dir /path/to/gaslighter
 ```
 
 ## How It Works
 
-**Stop** — if the model used Write/Edit, fires a completeness nudge. Mode controls delivery:
+**Stop** — when Claude tries to finish, fires a completeness nudge. Mode controls delivery:
 
 - `lite` (default) — non-blocking soft nudge via `additionalContext`, up to 3 nudges/session
 - `full` — hard block via `decision: "block"`, unlimited nudges
@@ -35,8 +44,6 @@ export GASLIGHTER_MODE=off
 ```
 
 `GASLIGHTER_MAX_NUDGES` similarly overrides the persisted/default nudge cap for one session (a positive integer, or `infinite`/`unlimited`/`-1`).
-
-Or say `stop gaslighter` / `normal mode` in conversation.
 
 ## Eval Suite
 
@@ -73,4 +80,4 @@ Merged across 6 eval runs (910 cells total: 5 tasks × 5 arms × 2 models, 8, 3,
 `gaslighter-full` leads on every quality metric — correctness, completion, and judged completeness — at a ~45% turn/cost premium over `baseline`.
 <!-- RENDER:RESULTS_PROSE:END -->
 
-Full findings and all 760 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).
+Full findings and all 910 individual run scores: [`docs/eval-findings.md`](docs/eval-findings.md).

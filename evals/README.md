@@ -6,7 +6,7 @@ Measures **requirement completion rate** — what fraction of explicitly stated 
 
 ```bash
 python3 run.py --selftest           # validate scorers, no API
-python3 run.py --all --runs 4       # 5 tasks x 3 arms (60 cells)
+python3 run.py --all --runs 4       # 5 tasks x 5 arms x 2 models (200 cells)
 python3 run.py --all --models haiku,sonnet --runs 4  # multi-model
 ```
 
@@ -28,8 +28,8 @@ Each task targets a specific failure mode where models drop requirements.
 |-----|-------------|
 | **baseline** | No plugin, no extra prompts |
 | **gaslighter-off** | Plugin loaded but `GASLIGHTER_MODE=off` (measures plugin overhead) |
-| **gaslighter-lite** | Plugin with `GASLIGHTER_MODE=lite` (exit 1, soft nudge) |
-| **gaslighter-full** | Plugin with `GASLIGHTER_MODE=full` (exit 2, hard block) |
+| **gaslighter-lite** | Plugin with `GASLIGHTER_MODE=lite` (non-blocking soft nudge via `additionalContext`) |
+| **gaslighter-full** | Plugin with `GASLIGHTER_MODE=full` (hard block via `decision: "block"`) |
 | **nudge-prompt** | Static system prompt with nudge text |
 
 ## Judge

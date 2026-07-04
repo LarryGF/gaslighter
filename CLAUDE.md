@@ -4,7 +4,7 @@ Claude Code plugin that uses a Stop hook to nudge Claude into verifying requirem
 
 ## How It Works
 
-When Claude uses Write or Edit tools, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; subsequent nudges give an escape hatch — if the model's last turn (read from `transcript_path`) already declares "100% certain/confident/sure", the hook stops nudging immediately instead of counting up to the cap regardless of what was said.
+Each time Claude tries to finish a response, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; subsequent nudges give an escape hatch — if the model's last turn (read from `transcript_path`) already declares "100% certain/confident/sure", the hook stops nudging immediately instead of counting up to the cap regardless of what was said.
 
 ## Modes
 
@@ -20,11 +20,11 @@ Both delivery modes deliver via stdout + exit 0 (per the [Stop Hook Reference](h
 ## Structure
 
 - `.claude-plugin/plugin.json` — plugin manifest
+- `.claude-plugin/marketplace.json` — self-hosted marketplace listing (public install path)
 - `hooks/` — hook scripts (Node.js, CommonJS)
   - `gaslighter-hooks.json` — hook registration (Stop only)
   - `gaslighter-nudge.js` — Stop hook: mode/config check, anti-loop guard, emit nudge
   - `gaslighter-config-cli.js` — CLI wrapper for reading/writing persisted config.json
-  - `gaslighter-statusline.sh` / `.ps1` — statusline badge
   - `package.json` — CommonJS marker
 - `agents/judge-agent.md` — judge sub-agent definition (rubrics, calibration)
 - `skills/gaslighter/SKILL.md` — orchestrator skill (routes to eval/judge/config)

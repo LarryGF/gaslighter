@@ -71,4 +71,4 @@ Override per-session without touching the persisted config:
 
 ## How It Works
 
-When you use Write or Edit tools, the hook fires and asks you to re-check the original request. It fires at most once per turn, up to the mode's nudge cap (see Modes above). First nudge forces re-examination; subsequent nudges give you an escape hatch if you're genuinely done.
+Each time you try to finish a response, the hook fires and asks you to re-check the original request. It fires at most once per stop, up to the mode's nudge cap (see Modes above). First nudge forces re-examination; subsequent nudges give you an escape hatch if you're genuinely done.
