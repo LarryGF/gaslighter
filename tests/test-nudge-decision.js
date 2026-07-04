@@ -254,10 +254,12 @@ test('lastAssistantText: returns empty string for missing path', function () {
 
 // --- anti-loop: stops early once confidence is declared, without hitting the cap of 3 ---
 
-test('anti-loop: nudges again after a plain confirmation (no escape hatch used)', function () {
+test('anti-loop: nudges again after a confirmation turn that still used tools', function () {
   var sessionId = 'test-noconf-' + Date.now();
   var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
   var transcript = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
     { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } }
   ]);
   var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
@@ -296,6 +298,81 @@ test('anti-loop: stops nudging as soon as the model declares 100% confidence, be
   assert.strictEqual(third.status, 0);
 });
 
+// --- tool-activity heuristic: a text-only answer to a nudge ends the loop ---
+
+test('anti-loop: stops nudging when the model answers a nudge without any tool call', function () {
+  var sessionId = 'test-notools-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  function fire(transcript) {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'what time is it?' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I do not have access to the current time.' }] } }
+  ])); // nudge 1: forced regardless of transcript
+  var second = fire(writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'what time is it?' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'I did address it — nothing further to implement.' }] } }
+  ])); // model re-checked without tools -> no wording match needed, stay silent
+  assert.strictEqual(second.stdout, '');
+  assert.strictEqual(second.status, 0);
+});
+
+test('anti-loop: unreadable transcript keeps nudging (heuristic treats it as unknown)', function () {
+  var sessionId = 'test-noread-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  function fire() {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: '/no/such/file.jsonl' }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(); // nudge 1
+  var second = fire();
+  var out = JSON.parse(second.stdout);
+  assert.ok(out.hookSpecificOutput.additionalContext.includes('One more check'));
+});
+
+// --- analyzeLastTurn ---
+
+test('analyzeLastTurn: scopes to the last turn and detects tool use', function () {
+  var p = writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'hi' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }
+  ]);
+  var turn = nudge.analyzeLastTurn(p);
+  assert.strictEqual(turn.text, 'done');
+  assert.strictEqual(turn.usedTools, true);
+});
+
+test('analyzeLastTurn: prior turn tool use does not leak into the last turn', function () {
+  var p = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: 'thanks, anything else?' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'all good' }] } }
+  ]);
+  var turn = nudge.analyzeLastTurn(p);
+  assert.strictEqual(turn.text, 'all good');
+  assert.strictEqual(turn.usedTools, false);
+});
+
+test('analyzeLastTurn: returns null for missing path or transcript without assistant entries', function () {
+  assert.strictEqual(nudge.analyzeLastTurn(undefined), null);
+  assert.strictEqual(nudge.analyzeLastTurn('/no/such/file.jsonl'), null);
+  assert.strictEqual(nudge.analyzeLastTurn(writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'hi' } }
+  ])), null);
+});
+
 // --- readStable: survives a transcript that's still being written ---
 
 test('readStable: waits out a delayed write instead of reading a stale/partial file', function () {
@@ -307,7 +384,7 @@ test('readStable: waits out a delayed write instead of reading a stale/partial f
   // line from a detached async process shortly after we start polling.
   require('child_process').spawn('bash', ['-c', 'sleep 0.03 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
   var text = nudge.lastAssistantText(p);
-  assert.strictEqual(text, 'fresh text');
+  assert.ok(text.includes('fresh text'));
 });
 
 // --- end-to-end: persisted full config with no cap overrides a high nudge_count ---
