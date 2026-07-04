@@ -17,7 +17,7 @@ Reads and writes the persisted `${CLAUDE_PLUGIN_DATA}/config.json` (mode + nudge
 Run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get
 ```
 
 ## Step 2: Branch on result
@@ -79,7 +79,7 @@ If "Change", repeat Step 2's "no config yet" flow to collect a new mode/cap.
 Run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --set '{"mode":"<mode>","maxNudges":<n or omitted>}'
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --set '{"mode":"<mode>","maxNudges":<n or omitted>}'
 ```
 
 Confirm what was saved by printing the `--set` output, and note that the `GASLIGHTER_MODE` and `GASLIGHTER_MAX_NUDGES` env vars override this persisted config when set (useful for CI or one-off runs).
