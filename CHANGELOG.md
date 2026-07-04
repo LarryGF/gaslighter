@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.4] - 2026-07-04
 
 ### Added
 
@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- `readStable()` window widened from ~40ms to ~620ms worst case (doubling backoff, early exit once the file stops growing). The 40ms window was observed live losing the transcript-flush race, making the hook nudge straight past a "100% certain" declaration.
+- **Infinite full-mode nudge loop.** Measured live: the harness flushes the turn's final text entry to `transcript_path` ~200ms *after* the Stop hook starts, so any immediate read sees a mid-flush or previous-turn file and the escape hatches never trigger (observed: 9 blind nudges on a bare "hi" until the harness force-override). Replaced `readStable()`'s blind length-based retries with `waitForTurn()`: poll every 150ms (up to 5s, tunable via `GASLIGHTER_FLUSH_WAIT_MS`) until the last turn's newest entry is an assistant *text* entry (= fully flushed), then judge it. On timeout the hook now fails quiet (no nudge) instead of nudging blind — a slow flush can no longer loop.
 
 ---
 
