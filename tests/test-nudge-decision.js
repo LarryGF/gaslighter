@@ -323,10 +323,10 @@ test('anti-loop: stops nudging when the model answers a nudge without any tool c
   assert.strictEqual(second.status, 0);
 });
 
-test('anti-loop: unreadable transcript keeps nudging (heuristic treats it as unknown)', function () {
+test('anti-loop: unreadable transcript fails quiet after the first nudge (never nudge blind)', function () {
   var sessionId = 'test-noread-' + Date.now();
   var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
-  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'full', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId, GASLIGHTER_FLUSH_WAIT_MS: '200' });
   function fire() {
     return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
       input: JSON.stringify({ session_id: sessionId, transcript_path: '/no/such/file.jsonl' }),
@@ -334,10 +334,38 @@ test('anti-loop: unreadable transcript keeps nudging (heuristic treats it as unk
       encoding: 'utf8'
     });
   }
-  fire(); // nudge 1
+  fire(); // nudge 1 (unconditional)
   var second = fire();
-  var out = JSON.parse(second.stdout);
-  assert.ok(out.hookSpecificOutput.additionalContext.includes('One more check'));
+  assert.strictEqual(second.stdout, '');
+  assert.strictEqual(second.status, 0);
+});
+
+test('anti-loop: waits out a late flush instead of misreading the previous turn', function () {
+  var sessionId = 'test-lateflush-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'full', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId, GASLIGHTER_FLUSH_WAIT_MS: '2000' });
+  function fire(transcript) {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(writeTranscript([])); // nudge 1
+  // Transcript initially ends mid-turn (tool_use last, no final text) — like
+  // the live flush race. The final text-only confirmation lands 300ms later.
+  var p = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'user', message: { role: 'user', content: 'Stop hook feedback: check again' } }
+  ]);
+  var finalLine = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'All covered, nothing missing.' }] } });
+  require('child_process').spawn('bash', ['-c', 'sleep 0.3 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
+  var second = fire(p);
+  // Turn after the nudge was text-only -> stays quiet, even though the text
+  // arrived after the hook started.
+  assert.strictEqual(second.stdout, '');
+  assert.strictEqual(second.status, 0);
 });
 
 // --- analyzeLastTurn ---
@@ -373,18 +401,27 @@ test('analyzeLastTurn: returns null for missing path or transcript without assis
   ])), null);
 });
 
-// --- readStable: survives a transcript that's still being written ---
+// --- waitForTurn: polls until the turn is fully flushed ---
 
-test('readStable: waits out a delayed write instead of reading a stale/partial file', function () {
+test('waitForTurn: waits for the final text entry before returning the turn', function () {
   var p = writeTranscript([
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'stale text' }] } }
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } }
   ]);
   var finalLine = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'fresh text' }] } });
-  // Simulate the harness still flushing the transcript: append the real final
-  // line from a detached async process shortly after we start polling.
-  require('child_process').spawn('bash', ['-c', 'sleep 0.03 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
-  var text = nudge.lastAssistantText(p);
-  assert.ok(text.includes('fresh text'));
+  require('child_process').spawn('bash', ['-c', 'sleep 0.2 && printf "%s\\n" ' + JSON.stringify(finalLine) + ' >> ' + JSON.stringify(p)], { detached: true, stdio: 'ignore' }).unref();
+  var turn = nudge.waitForTurn(p, 2000);
+  assert.ok(turn);
+  assert.strictEqual(turn.complete, true);
+  assert.ok(turn.text.includes('fresh text'));
+  assert.strictEqual(turn.usedTools, true);
+});
+
+test('waitForTurn: returns null on timeout when the turn never flushes', function () {
+  var p = writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'hi' } }
+  ]);
+  assert.strictEqual(nudge.waitForTurn(p, 300), null);
 });
 
 // --- end-to-end: persisted full config with no cap overrides a high nudge_count ---
@@ -394,10 +431,15 @@ test('end-to-end: persisted full config (no GASLIGHTER_MODE) still nudges past 5
   var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
   fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({ mode: 'full' }));
   fs.writeFileSync(path.join(dataDir, 'state-' + sessionId + '.json'), JSON.stringify({ nudge_count: 50, turn_count: 50 }));
+  var transcript = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Applied the fix.' }] } }
+  ]);
   var env = Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
   delete env.GASLIGHTER_MODE;
   var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
-    input: JSON.stringify({ session_id: sessionId }),
+    input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
     env: env,
     encoding: 'utf8'
   });
