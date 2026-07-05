@@ -133,7 +133,9 @@ def check_plugin():
         sid = f"selftest-plugin-{mode}"
         state_path = data_dir / f"state-{sid}.json"
         state_path.unlink(missing_ok=True)
-        env = {**os.environ, "GASLIGHTER_MODE": mode, "CLAUDE_SESSION_ID": sid}
+        # no transcript_path in the payload here, so bypass Phase 1.1's edit-activity gate
+        env = {**os.environ, "GASLIGHTER_MODE": mode, "CLAUDE_SESSION_ID": sid,
+               "GASLIGHTER_NUDGE_ON_READONLY": "1"}
         r = subprocess.run(["node", str(hook)], input="{}", capture_output=True, text=True, env=env)
         ok = check(r.stdout) and r.returncode == 0
         print(f"{'ok ' if ok else 'XX '} hook mode={mode:<4} exit={r.returncode} stdout={r.stdout[:80]!r}")
