@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0] - 2026-07-05
+
+### Added
+
+- **`smart` mode**: instead of nudging unconditionally, shells out to a cheap model (`claude -p ... --model claude-haiku-4-5`) asking whether the turn actually missed a requirement, and only hard-blocks with the specific gap when it says so. Falls back to a plain nudge on any check failure (missing binary, timeout, malformed output) — never crashes, never blocks on the failed check. Default cap 2/session.
+- **First-nudge edit gate**: the first nudge now only fires if the turn actually touched files (`Edit`/`Write`/`NotebookEdit`/`Bash`) — pure Q&A turns get no nudge and no added latency. `nudgeOnReadOnly: true` (config/env) restores the old unconditional behavior.
+- **Anti-overcorrection guard**: both nudge texts now explicitly say not to add unrequested features, refactors, tests, or "improvements" beyond scope.
+- **`quiet` delivery**: `lite` mode's nudge is now hidden from the transcript by default (`suppressOutput: true`) while still reaching the model via `additionalContext`; `full` mode always shows a one-line `systemMessage` instead, since its block is inherently user-visible.
+- **Request capture**: a new `UserPromptSubmit` hook captures non-trivial user prompts into session state, so subsequent nudges (and `smart` mode's check) can quote the original request verbatim even after compaction.
+- **Session cleanup**: a new `SessionEnd` hook deletes the ending session's state file and any state files older than 7 days.
+- `stop_hook_active` cross-check: a first-nudge Stop where the harness reports it's a continuation (but our own state shows `nudge_count === 0`, i.e. state file missing/mismatched) is now treated as a continuation instead of re-firing the first nudge.
+
+### Fixed
+
+- **Stale-turn race in the anti-loop guard**: `waitForTurn` accepted any trailing turn that merely *looked* complete, without checking it was actually new since the last invocation. If the hook's first poll landed before the harness finished flushing the just-generated turn, it would silently re-judge the *previous* turn instead — observed live as a turn explicitly declaring "100% certain" getting skipped entirely, causing an extra nudge. Fixed by tagging each turn with its transcript `uuid` and requiring a genuinely new one before accepting it as fresh.
+
 ## [1.1.4] - 2026-07-04
 
 ### Added
