@@ -3,7 +3,7 @@
 
 var nudge = require('./gaslighter-nudge');
 
-var VALID_MODES = ['off', 'lite', 'full'];
+var VALID_MODES = ['off', 'lite', 'full', 'smart'];
 
 function validate(cfg) {
   if (cfg.mode !== undefined && VALID_MODES.indexOf(cfg.mode) === -1) {
@@ -17,6 +17,12 @@ function validate(cfg) {
     } else {
       throw new Error('maxNudges must be a positive integer, "infinite", or omitted');
     }
+  }
+  if (cfg.quiet !== undefined && typeof cfg.quiet !== 'boolean') {
+    throw new Error('quiet must be a boolean');
+  }
+  if (cfg.nudgeOnReadOnly !== undefined && typeof cfg.nudgeOnReadOnly !== 'boolean') {
+    throw new Error('nudgeOnReadOnly must be a boolean');
   }
 }
 
