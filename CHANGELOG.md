@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] - 2026-07-06
+
+### Added
+
+- **Background-work filter**: the Stop hook now skips entirely (no state mutation, no nudge) when `background_tasks` or `session_crons` is non-empty in the hook input (Claude Code v2.1.145+) — a session pausing for a backgrounded Bash command, a spawned subagent, or a scheduled cron is not actually finishing, so nudging there would be premature and would silently waste a cap slot.
+
+### Fixed
+
+- **Turn-merging bug in `analyzeLastTurn`**: lite mode's `additionalContext` delivery never inserts a real user-turn boundary in the transcript, so the backward scan for "the last turn" only stopped at an *actual* human message — meaning a tool call from turns ago kept leaking into every later turn's `usedTools`/`editedFiles` result. Live-observed nudging 3 times in a row despite two consecutive tool-free confirmations, because the stale tool call from before the first nudge permanently defeated the `!turn.usedTools` early-exit. Fixed by scoping `analyzeLastTurn` to entries strictly after the previously-judged turn's `uuid`, not just the last real user message.
+
+### Known limitation
+
+- **`quiet` delivery does not fully hide the nudge**: `hookSpecificOutput.additionalContext` itself isn't rendered as a chat message, but the CLI separately surfaces it via a `hook_additional_context` attachment and a `stop_hook_summary` line (`● Ran N stop hooks ⎿ Stop hook feedback: ...`) that `suppressOutput` does not affect — confirmed by inspecting a live session's transcript JSONL. Filed as feedback to Anthropic; no code-side fix currently possible.
+
 ## [1.2.0] - 2026-07-05
 
 ### Added
