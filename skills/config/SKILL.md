@@ -33,6 +33,7 @@ AskUserQuestion({
     options: [
       { label: "lite (default)", description: "Hook on, soft nudge, up to 3 per session" },
       { label: "full", description: "Hook on, hard block, unlimited nudges" },
+      { label: "smart", description: "Hook on, asks a cheap model whether anything was actually missed before nudging; up to 2 per session, ~2-5s + one Haiku call per gated stop" },
       { label: "off", description: "Hook disabled, 0 nudges" }
     ]
   }]
@@ -48,7 +49,7 @@ AskUserQuestion({
     header: "Nudge cap",
     multiSelect: false,
     options: [
-      { label: "Use default", description: "lite=3, full=unlimited" }
+      { label: "Use default", description: "lite=3, full=unlimited, smart=2" }
     ]
   }]
 })
@@ -56,12 +57,41 @@ AskUserQuestion({
 
 The user can select "Other" to type a custom number (or "infinite"/"unlimited"). If they chose "Use default", omit `maxNudges` from the config entirely (mode default applies).
 
-**If the output already has a `mode`** — show the current `mode`/`maxNudges` and ask:
+If mode is not `off`, also ask about the two delivery options (skip both if the user just
+wants defaults — `quiet` defaults to `true` for lite / `false` for full, `nudgeOnReadOnly`
+defaults to `false`):
 
 ```
 AskUserQuestion({
   questions: [{
-    question: "Current mode is {mode} (nudge cap: {maxNudges or 'default'}). Keep it or change it?",
+    question: "Should the nudge be hidden from the transcript (quiet) or shown to the user?",
+    header: "Quiet",
+    multiSelect: false,
+    options: [
+      { label: "Use default", description: "quiet for lite, visible for full" },
+      { label: "Quiet", description: "suppressOutput: true — model still sees it, user doesn't" },
+      { label: "Visible", description: "user sees the nudge in the transcript" }
+    ]
+  }, {
+    question: "Nudge on read-only (no file-edit) turns too, or only after file changes?",
+    header: "Read-only",
+    multiSelect: false,
+    options: [
+      { label: "Only after edits (default)", description: "skip the first nudge on pure Q&A turns" },
+      { label: "Always nudge", description: "nudgeOnReadOnly: true — nudge even with no Edit/Write/Bash activity" }
+    ]
+  }]
+})
+```
+
+Omit `quiet`/`nudgeOnReadOnly` from the persisted config when the user picks the default option for each.
+
+**If the output already has a `mode`** — show the current `mode`/`maxNudges`/`quiet`/`nudgeOnReadOnly` and ask:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "Current mode is {mode} (nudge cap: {maxNudges or 'default'}, quiet: {quiet or 'default'}, nudgeOnReadOnly: {nudgeOnReadOnly or 'default'}). Keep it or change it?",
     header: "Config",
     multiSelect: false,
     options: [
@@ -79,7 +109,7 @@ If "Change", repeat Step 2's "no config yet" flow to collect a new mode/cap.
 Run:
 
 ```
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --set '{"mode":"<mode>","maxNudges":<n or omitted>}'
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --set '{"mode":"<mode>","maxNudges":<n or omitted>,"quiet":<bool or omitted>,"nudgeOnReadOnly":<bool or omitted>}'
 ```
 
 Confirm what was saved by printing the `--set` output, and note that the `GASLIGHTER_MODE` and `GASLIGHTER_MAX_NUDGES` env vars override this persisted config when set (useful for CI or one-off runs).

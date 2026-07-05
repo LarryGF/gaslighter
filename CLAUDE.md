@@ -4,18 +4,46 @@ Claude Code plugin that uses a Stop hook to nudge Claude into verifying requirem
 
 ## How It Works
 
-Each time Claude tries to finish a response, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request. Anti-loop guard: capped nudges per session (see Modes below). First nudge forces re-examination; after that the hook stops early (before the cap) when the model's last turn shows it has nothing left to do: either it declares "100% certain/confident/sure" (regex fast-path), or the turn contained zero tool calls — meaning it re-checked and changed nothing, so further nudging is noise no matter how the confirmation is phrased. The harness flushes the turn's final text entry to `transcript_path` ~200ms *after* the Stop hook starts, so the hook polls via `waitForTurn()` (150ms interval, 5s deadline, `GASLIGHTER_FLUSH_WAIT_MS` override) until the turn is fully flushed before judging it; on timeout it fails quiet — it never nudges blind.
+Each time Claude tries to finish a response, the Stop hook fires a short psychologically-effective nudge asking it to re-read the original request, plus a line telling it not to add unrequested scope (guards against overcorrection). Anti-loop guard: capped nudges per session (see Modes below). The **first** nudge is gated on file-modifying activity (`Edit`/`Write`/`NotebookEdit`/`Bash` in the turn's tool calls) — pure Q&A turns get no nudge at all; set `nudgeOnReadOnly: true` in config.json or `GASLIGHTER_NUDGE_ON_READONLY=1` to restore unconditional nudging. After the first nudge, the hook stops early (before the cap) when the model's last turn shows it has nothing left to do: either it declares "100% certain/confident/sure" (regex fast-path), or the turn contained zero tool calls — meaning it re-checked and changed nothing, so further nudging is noise no matter how the confirmation is phrased. The harness flushes the turn's final text entry to `transcript_path` ~200ms *after* the Stop hook starts, so the hook polls via `waitForTurn()` (150ms interval, 5s deadline, `GASLIGHTER_FLUSH_WAIT_MS` override) until the turn is fully flushed before judging it; on timeout it fails quiet — it never nudges blind. `waitForTurn` also guards against a subtler race: "flushed" alone isn't enough, because the *previous* turn already looks flushed too (it also ended in a real text entry) — a poll that lands before the harness appends the new turn will happily accept the old one as if it were fresh. `analyzeLastTurn` tags each turn with its transcript `uuid`, and the hook passes the previously-processed uuid as a staleness guard so a poll can't accept the same turn twice; this was live-observed to make a real "I'm 100% certain" turn get skipped entirely (the hook judged the prior, non-confident turn instead) — lite mode's non-blocking delivery never inserts a synthetic user-turn boundary between nudges, so without the uuid check the two turns were otherwise indistinguishable. If `stop_hook_active` is true on a turn where our own state shows `nudge_count === 0` (state file missing/mismatched, e.g. wrong data dir), the hook treats it as a continuation rather than firing the first nudge again.
+
+`full` mode's unlimited cap is bounded in practice by Claude Code's own harness-level override: it force-overrides a Stop hook after **8 consecutive blocks without progress** (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` raises it).
 
 ## Modes
 
-Mode and nudge cap are persisted to `${CLAUDE_PLUGIN_DATA}/config.json` (`{ "mode": "lite", "maxNudges": 3 }`, `maxNudges` optional). Set via the `gaslighter:config` skill. Precedence for each setting independently: env var > persisted `config.json` > mode default.
+Mode, nudge cap, and delivery options are persisted to `${CLAUDE_PLUGIN_DATA}/config.json`
+(`{ "mode": "lite", "maxNudges": 3, "quiet": true, "nudgeOnReadOnly": false }`, all keys but
+`mode` optional). Set via the `gaslighter:config` skill. Precedence for each setting
+independently: env var > persisted `config.json` > mode default.
 
-Both delivery modes deliver via stdout + exit 0 (per the [Stop Hook Reference](https://code.claude.com/docs/en/hooks.md#stop-hook-reference), the JSON decision protocol only works this way):
+Delivery modes deliver via stdout + exit 0 (per the [Stop Hook Reference](https://code.claude.com/docs/en/hooks.md#stop-hook-reference), the JSON decision protocol only works this way):
 - `lite` (default) — `hookSpecificOutput.additionalContext`, non-blocking soft nudge, default cap 3
 - `full` — `decision: "block"`, hard block, default cap unlimited
+- `smart` — asks a cheap model (`claude -p ... --model claude-haiku-4-5`) whether the turn actually missed a requirement instead of nudging unconditionally; only blocks (`decision: "block"`) when it says so, with the specific gap as the reason. Default cap 2. On any check failure (missing `claude` binary, non-zero exit, timeout, malformed output) it never crashes and never blocks on the failed check — it falls back to a plain lite-style nudge instead. Costs ~2-5s latency and one Haiku call per gated Stop; trades that for nudging only when something is actually missing rather than every time. `GASLIGHTER_SMART_CMD` overrides the binary invoked (used by tests to stub the CLI).
 - `off` — disabled, cap always 0
 
 `GASLIGHTER_MODE` overrides the persisted mode; `GASLIGHTER_MAX_NUDGES` overrides the persisted/default cap (`infinite`/`unlimited`/`-1` for no cap).
+
+### `quiet` — invisible nudges
+
+`quiet` (bool, `GASLIGHTER_QUIET` env override) controls whether the nudge is hidden from
+the transcript UI via `suppressOutput: true` — the nudge text still reaches the model via
+`additionalContext`, it's just not rendered to the user. Default: `true` for `lite`,
+`false` for `full`. `full` mode is a hard block by design and is always user-visible; it
+instead gets a one-line `systemMessage` ("gaslighter: verifying completeness (nudge N/cap)")
+so the user sees why the turn continued, without polluting model context.
+
+### `nudgeOnReadOnly` — first-nudge edit gate
+
+`nudgeOnReadOnly` (bool, `GASLIGHTER_NUDGE_ON_READONLY` env override, default `false`)
+restores nudging on the first Stop even when the turn made no file-modifying tool calls.
+
+### Request capture (defense in depth)
+
+A `UserPromptSubmit` hook (`hooks/gaslighter-capture.js`) writes the user's prompt into
+session state (`last_request: {prompt, ts}`) whenever it's non-trivial (≥80 chars, and not
+a `/slash-command`) — this survives compaction, which can drop the literal original ask
+from context. Subsequent nudges (not the first — the request is still live in context on a
+turn's first stop) quote it verbatim ahead of the generic nudge text when present.
 
 ## Structure
 

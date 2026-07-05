@@ -32,13 +32,16 @@ Claude re-reads the request, catches "available alongside the existing handlers"
 
 ## How it works
 
-Each time Claude tries to finish a response, a [Stop hook](https://code.claude.com/docs/en/hooks) fires and asks it to re-verify the original request against what it actually did. It's built not to become a nag loop: one nudge per stop, a session cap, and an escape hatch — once Claude answers a nudge without changing anything (no tool calls) or declares it's 100% certain everything is covered, the nudging stops for the session.
+Each time Claude tries to finish a response, a [Stop hook](https://code.claude.com/docs/en/hooks) fires and asks it to re-verify the original request against what it actually did. It's built not to become a nag loop: one nudge per stop, a session cap, and an escape hatch — once Claude answers a nudge without changing anything (no tool calls) or declares it's 100% certain everything is covered, the nudging stops for the session. The first nudge only fires if the turn actually touched files (`Edit`/`Write`/`Bash`) — pure Q&A turns get no nudge, no added latency. Lite mode's nudge is invisible by default (hidden from the transcript, still reaches the model); full mode's block always shows a one-line status so you know why the turn continued.
 
 | Mode | Delivery | Default cap |
 |------|----------|-------------|
 | `lite` (default) | Soft nudge, Claude can still finish | 3 / session |
 | `full` | Hard block, Claude can't finish until it re-verifies | unlimited |
+| `smart` | Asks a cheap model (Haiku) whether anything was actually missed before nudging; only blocks when it says so | 2 / session |
 | `off` | Hook exits silently | 0 |
+
+`smart` trades latency for precision: instead of nudging on every gated Stop, it spends ~2-5s and one Haiku call asking whether the turn actually missed a requirement, and only hard-blocks when it flags a specific gap. If the check itself fails (no `claude` binary, timeout, malformed output) it never blocks on the failure — it falls back to a plain nudge instead. Not yet in the numbers below; it's new and hasn't been benchmarked against the other modes yet.
 
 ## The numbers
 
