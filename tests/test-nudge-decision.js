@@ -291,11 +291,44 @@ test('anti-loop: nudges again after a confirmation turn that still used tools', 
     });
   }
   fire(); // nudge 1 (first, edit-gate satisfied by the Edit tool_use above)
-  // Simulates the model's response to nudge 1 landing as a new turn.
+  // Simulates the model's response to nudge 1: it ran another tool before
+  // replying, so the *new* turn genuinely used tools of its own.
+  appendToTranscript(transcript, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: {} }] } });
+  appendToTranscript(transcript, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } });
   appendToTranscript(transcript, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } });
-  var second = fire(); // nudge 2: last assistant text has no confidence declaration -> nudges again
+  var second = fire(); // nudge 2: new turn used tools and has no confidence declaration -> nudges again
   var out = JSON.parse(second.stdout);
   assert.ok(out.hookSpecificOutput.additionalContext.includes('One more check'));
+});
+
+test('anti-loop: a prior turn\'s tool use does not leak forward across nudge cycles', function () {
+  // Regression test: lite mode's additionalContext delivery never inserts a
+  // real user-turn boundary between nudges, so analyzeLastTurn must scope to
+  // entries after the previously-judged turn's uuid, not just the last real
+  // user message. Otherwise an Edit from turns ago keeps usedTools stuck
+  // true forever, and a genuinely tool-free confirmation still gets nudged.
+  var sessionId = 'test-noleak-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var transcript = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Applied the fix.' }] } }
+  ]);
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  function fire() {
+    return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+      input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
+      env: env,
+      encoding: 'utf8'
+    });
+  }
+  fire(); // nudge 1 (edit-gate satisfied by the Edit tool_use above)
+  // Response to nudge 1: plain text, no tool calls, no real user message
+  // boundary in between (matches production lite-mode delivery).
+  appendToTranscript(transcript, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } });
+  var second = fire();
+  assert.strictEqual(second.stdout, '');
+  assert.strictEqual(second.status, 0);
 });
 
 test('anti-loop: stops nudging as soon as the model declares 100% confidence, before hitting the cap of 3', function () {
@@ -343,6 +376,51 @@ test('anti-loop: stops nudging when the model answers a nudge without any tool c
   ])); // model re-checked without tools -> no wording match needed, stay silent
   assert.strictEqual(second.stdout, '');
   assert.strictEqual(second.status, 0);
+});
+
+test('background work pending: skips the nudge without touching state (background_tasks)', function () {
+  var sessionId = 'test-bgtask-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', GASLIGHTER_NUDGE_ON_READONLY: '1', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+    input: JSON.stringify({
+      session_id: sessionId,
+      background_tasks: [{ id: 'bg-1', type: 'bash', status: 'running', description: 'long build' }]
+    }),
+    env: env,
+    encoding: 'utf8'
+  });
+  assert.strictEqual(result.stdout, '');
+  assert.strictEqual(result.status, 0);
+});
+
+test('background work pending: skips the nudge without touching state (session_crons)', function () {
+  var sessionId = 'test-cron-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'full', GASLIGHTER_NUDGE_ON_READONLY: '1', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+    input: JSON.stringify({
+      session_id: sessionId,
+      session_crons: [{ id: 'cron-1', schedule: '*/5 * * * *', recurring: true, prompt: 'check status' }]
+    }),
+    env: env,
+    encoding: 'utf8'
+  });
+  assert.strictEqual(result.stdout, '');
+  assert.strictEqual(result.status, 0);
+});
+
+test('background work pending: empty arrays do not suppress the nudge', function () {
+  var sessionId = 'test-bgempty-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', GASLIGHTER_NUDGE_ON_READONLY: '1', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
+    input: JSON.stringify({ session_id: sessionId, background_tasks: [], session_crons: [] }),
+    env: env,
+    encoding: 'utf8'
+  });
+  var out = JSON.parse(result.stdout);
+  assert.ok(out.hookSpecificOutput.additionalContext.includes('absolutely sure'));
 });
 
 test('anti-loop: unreadable transcript fails quiet after the first nudge (never nudge blind)', function () {
@@ -413,6 +491,24 @@ test('analyzeLastTurn: prior turn tool use does not leak into the last turn', fu
   var turn = nudge.analyzeLastTurn(p);
   assert.strictEqual(turn.text, 'all good');
   assert.strictEqual(turn.usedTools, false);
+});
+
+test('analyzeLastTurn: staleUuid boundary scopes to entries after the previously-judged turn', function () {
+  // No real user message between the two assistant entries, matching how
+  // lite mode's additionalContext delivery never inserts one.
+  var p = writeTranscript([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Applied the fix.' }] } }
+  ]);
+  var firstTurn = nudge.analyzeLastTurn(p);
+  assert.strictEqual(firstTurn.usedTools, true);
+  appendToTranscript(p, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Confirmed: done.' }] } });
+  var withoutStale = nudge.analyzeLastTurn(p);
+  assert.strictEqual(withoutStale.usedTools, true, 'without staleUuid, old tool_use still leaks forward');
+  var scoped = nudge.analyzeLastTurn(p, firstTurn.uuid);
+  assert.strictEqual(scoped.usedTools, false);
+  assert.strictEqual(scoped.text, 'Confirmed: done.');
 });
 
 test('analyzeLastTurn: returns null for missing path or transcript without assistant entries', function () {
