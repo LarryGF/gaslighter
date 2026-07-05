@@ -34,6 +34,22 @@ if (require.main === module) {
 
     if (mode === 'off') { debugLog('exit_mode_off'); process.exit(0); }
 
+    // Session is pausing for background work (a backgrounded Bash command, a
+    // spawned subagent, a scheduled cron), not actually finishing — nudging
+    // here is premature and untracked (we'd never see whether the model acts
+    // on it before the real stop). Available since Claude Code v2.1.145;
+    // undefined on older CLI versions, which is treated as "nothing pending".
+    var pendingBackgroundWork = (payload.background_tasks && payload.background_tasks.length > 0) ||
+      (payload.session_crons && payload.session_crons.length > 0);
+    if (pendingBackgroundWork) {
+      debugLog('exit_background_pending', {
+        session: sessionId,
+        tasks: (payload.background_tasks || []).length,
+        crons: (payload.session_crons || []).length
+      });
+      process.exit(0);
+    }
+
     var state = loadState(sessionId);
     state.turn_count = (state.turn_count || 0) + 1;
 
@@ -256,7 +272,14 @@ function sleepSync(ms) {
 // (its newest entry is an assistant text entry — the harness writes the final
 // text entry last). Returns null when the transcript is missing/unreadable or
 // holds no assistant entry.
-function analyzeLastTurn(transcriptPath) {
+// staleUuid, when given, is the uuid of the last assistant entry already
+// judged by a prior nudge cycle. Lite mode's additionalContext delivery
+// never inserts a real user-turn boundary (see waitForTurn's comment below),
+// so without this the backward walk keeps merging every turn since the last
+// real human message into one — a tool_use from turns ago (already judged
+// and nudged on) would permanently poison usedTools/editedFiles for every
+// later turn, even a plain-text one with no tool calls of its own.
+function analyzeLastTurn(transcriptPath, staleUuid) {
   if (!transcriptPath) return null;
   var lines;
   try { lines = fs.readFileSync(transcriptPath, 'utf8').split('\n'); } catch (e) { return null; }
@@ -274,6 +297,7 @@ function analyzeLastTurn(transcriptPath) {
     if (!entry.message || !entry.message.content) continue;
     var content = entry.message.content;
     if (entry.type === 'assistant') {
+      if (staleUuid && entry.uuid === staleUuid) break; // already-judged turn boundary
       var hasText = false;
       if (typeof content === 'string' && content) { texts.unshift(content); hasText = true; }
       if (Array.isArray(content)) {
@@ -321,7 +345,7 @@ function analyzeLastTurn(transcriptPath) {
 function waitForTurn(transcriptPath, deadlineMs, staleUuid) {
   var start = Date.now();
   while (true) {
-    var turn = analyzeLastTurn(transcriptPath);
+    var turn = analyzeLastTurn(transcriptPath, staleUuid);
     if (turn && turn.complete && turn.uuid !== staleUuid) return turn;
     if (Date.now() - start >= deadlineMs) return null;
     sleepSync(150);
