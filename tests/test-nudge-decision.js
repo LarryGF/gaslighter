@@ -27,9 +27,14 @@ var nudge = require('../hooks/gaslighter-nudge');
 
 test('getMode: defaults to lite when env not set', function () {
   var orig = process.env.GASLIGHTER_MODE;
+  var origData = process.env.CLAUDE_PLUGIN_DATA;
+  // Isolate the data dir so a persisted config.json (e.g. the developer's own
+  // {"mode":"full"}) can't leak in and make the default-mode assertion fail.
+  process.env.CLAUDE_PLUGIN_DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-config-'));
   delete process.env.GASLIGHTER_MODE;
   assert.strictEqual(nudge.getMode(), 'lite');
   if (orig !== undefined) process.env.GASLIGHTER_MODE = orig;
+  process.env.CLAUDE_PLUGIN_DATA = origData;
 });
 
 test('getMode: reads GASLIGHTER_MODE env var', function () {
@@ -679,6 +684,43 @@ test('first-nudge gate: GASLIGHTER_NUDGE_ON_READONLY=1 restores nudging on read-
   assert.ok(out.hookSpecificOutput.additionalContext.includes('absolutely sure'));
 });
 
+test('first-nudge gate: full mode also skips a read-only turn (edit gate applies beyond lite)', function () {
+  var sessionId = 'test-gate-full-readonly-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var transcript = writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'explain this' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is the explanation.' }] } }
+  ]);
+  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'full', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
+  delete env.GASLIGHTER_NUDGE_ON_READONLY;
+  var result = runHookFull(env, { session_id: sessionId, transcript_path: transcript });
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout, '');
+});
+
+test('first-nudge gate: smart mode also skips a read-only turn (edit gate applies before the smart check)', function () {
+  var sessionId = 'test-gate-smart-readonly-' + Date.now();
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
+  var transcript = writeTranscript([
+    { type: 'user', message: { role: 'user', content: 'explain this' } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: {} }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Here is the explanation.' }] } }
+  ]);
+  // Stub smart cmd would echo ok; a read-only turn must exit at the gate
+  // before ever reaching it, so no output and no smart invocation.
+  var env = Object.assign({}, process.env, {
+    GASLIGHTER_MODE: 'smart', GASLIGHTER_SMART_CMD: '/nonexistent/gaslighter-smart-stub-binary',
+    CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId
+  });
+  delete env.GASLIGHTER_NUDGE_ON_READONLY;
+  var result = runHookFull(env, { session_id: sessionId, transcript_path: transcript });
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout, '');
+});
+
 // --- Phase 1.3: quiet delivery ---
 
 test('quiet lite (default): output has suppressOutput:true', function () {
@@ -771,6 +813,33 @@ test('config CLI: rejects non-boolean quiet', function () {
   assert.strictEqual(result.status, 1);
 });
 
+function runConfigSet(json) {
+  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-cfg-'));
+  var env = Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: dataDir });
+  return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-config-cli.js'), '--set', json], { env: env, encoding: 'utf8' });
+}
+
+test('config CLI: rejects an invalid mode', function () {
+  assert.strictEqual(runConfigSet('{"mode":"turbo"}').status, 1);
+});
+
+test('config CLI: accepts maxNudges as a positive integer and as "infinite"', function () {
+  assert.deepStrictEqual(JSON.parse(runConfigSet('{"maxNudges":5}').stdout), { maxNudges: 5 });
+  assert.deepStrictEqual(JSON.parse(runConfigSet('{"maxNudges":"infinite"}').stdout), { maxNudges: 'infinite' });
+});
+
+test('config CLI: rejects non-positive, non-integer, and junk maxNudges', function () {
+  assert.strictEqual(runConfigSet('{"maxNudges":0}').status, 1);
+  assert.strictEqual(runConfigSet('{"maxNudges":-2}').status, 1);
+  assert.strictEqual(runConfigSet('{"maxNudges":2.5}').status, 1);
+  assert.strictEqual(runConfigSet('{"maxNudges":"lots"}').status, 1);
+});
+
+test('config CLI: accepts and rejects nudgeOnReadOnly by type', function () {
+  assert.deepStrictEqual(JSON.parse(runConfigSet('{"nudgeOnReadOnly":true}').stdout), { nudgeOnReadOnly: true });
+  assert.strictEqual(runConfigSet('{"nudgeOnReadOnly":"yes"}').status, 1);
+});
+
 // --- Cleanup script ---
 
 test('cleanup: removes own session state file and old files, keeps fresh ones', function () {
@@ -815,6 +884,14 @@ test('isTrivialPrompt: a real request (>=80 chars, not a slash command) is not t
   assert.strictEqual(capture.isTrivialPrompt(longPrompt), false);
 });
 
+test('isTrivialPrompt: synthetic task-notification/system-reminder replays are trivial', function () {
+  var notification = '<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Agent finished a very long task with lots of detail</summary>\n</task-notification>';
+  var reminder = '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, not a message from the user, and it is long enough to pass the trivial-length check.\n</system-reminder>';
+  assert.ok(notification.length >= 80 && reminder.length >= 80);
+  assert.strictEqual(capture.isTrivialPrompt(notification), true);
+  assert.strictEqual(capture.isTrivialPrompt(reminder), true);
+});
+
 function runCapture(env, payload) {
   return spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-capture.js')], {
     input: JSON.stringify(payload),
@@ -848,8 +925,8 @@ test('capture: merges into existing state instead of clobbering it', function ()
   assert.strictEqual(state.last_request.prompt, longPrompt);
 });
 
-test('capture: skips short prompts and slash commands (no last_request written)', function () {
-  ['yes', 'continue', '/commit'].forEach(function (prompt) {
+test('capture: skips short prompts, slash commands, and synthetic notifications (no last_request written)', function () {
+  ['yes', 'continue', '/commit', '<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Agent finished a very long task with lots of detail</summary>\n</task-notification>'].forEach(function (prompt) {
     var sessionId = 'test-capture-skip-' + Date.now() + '-' + Math.random();
     var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
     var env = Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });

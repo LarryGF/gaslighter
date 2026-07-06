@@ -9,10 +9,21 @@ var nudge = require('./gaslighter-nudge');
 var TRIVIAL_MIN_LENGTH = 80;
 var CAPTURE_MAX_LENGTH = 2000;
 
+// Background task/agent notifications get replayed into the transcript as a
+// synthetic "user" turn to resume the session — the harness fires
+// UserPromptSubmit for that turn same as a real one. Without this check,
+// notification text (which easily clears TRIVIAL_MIN_LENGTH and doesn't
+// start with "/") gets captured as last_request and quoted back to the
+// model later as if it were the user's original ask.
+var SYNTHETIC_PROMPT_PREFIXES = ['<task-notification', '<system-reminder', '[SYSTEM NOTIFICATION'];
+
 function isTrivialPrompt(prompt) {
   var trimmed = (prompt || '').trim();
   if (trimmed.length < TRIVIAL_MIN_LENGTH) return true;
   if (trimmed.charAt(0) === '/') return true;
+  for (var i = 0; i < SYNTHETIC_PROMPT_PREFIXES.length; i++) {
+    if (trimmed.indexOf(SYNTHETIC_PROMPT_PREFIXES[i]) === 0) return true;
+  }
   return false;
 }
 
