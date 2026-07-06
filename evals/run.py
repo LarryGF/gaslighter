@@ -43,6 +43,7 @@ ARMS = {
     "gaslighter-off": lambda: None,
     "gaslighter-lite": lambda: None,
     "gaslighter-full": lambda: None,
+    "gaslighter-smart": lambda: None,
     "nudge-prompt": lambda: NUDGE_PROMPT,
 }
 
@@ -138,10 +139,39 @@ def check_plugin():
                "GASLIGHTER_NUDGE_ON_READONLY": "1"}
         r = subprocess.run(["node", str(hook)], input="{}", capture_output=True, text=True, env=env)
         ok = check(r.stdout) and r.returncode == 0
-        print(f"{'ok ' if ok else 'XX '} hook mode={mode:<4} exit={r.returncode} stdout={r.stdout[:80]!r}")
+        print(f"{'ok ' if ok else 'XX '} hook mode={mode:<5} exit={r.returncode} stdout={r.stdout[:80]!r}")
         failures += 0 if ok else 1
         state_path.unlink(missing_ok=True)
+    failures += _check_smart(hook, data_dir)
     return failures
+
+
+def _check_smart(hook, data_dir):
+    # smart mode reads the last turn's text, so it needs a transcript (unlike
+    # the input="{}" modes above). A deliberately-missing GASLIGHTER_SMART_CMD
+    # forces the fail-quiet fallback to a plain lite-style nudge — verifies the
+    # protocol without spending an API call on the real Haiku check.
+    sid = "selftest-plugin-smart"
+    state_path = data_dir / f"state-{sid}.json"
+    state_path.unlink(missing_ok=True)
+    turn = [
+        {"type": "user", "message": {"role": "user", "content": "Add a widget endpoint with validation."}},
+        {"type": "assistant", "uuid": "u1", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {}}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}},
+        {"type": "assistant", "uuid": "u2", "message": {"role": "assistant", "content": [{"type": "text", "text": "Added the endpoint."}]}},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        tp = Path(d) / "transcript.jsonl"
+        tp.write_text("\n".join(json.dumps(e) for e in turn) + "\n", encoding="utf-8")
+        env = {**os.environ, "GASLIGHTER_MODE": "smart", "CLAUDE_SESSION_ID": sid,
+               "GASLIGHTER_SMART_CMD": "/nonexistent/gaslighter-smart-selftest",
+               "GASLIGHTER_FLUSH_WAIT_MS": "1000"}
+        payload = json.dumps({"session_id": sid, "transcript_path": str(tp)})
+        r = subprocess.run(["node", str(hook)], input=payload, capture_output=True, text=True, env=env)
+    ok = '"additionalContext"' in r.stdout and '"decision"' not in r.stdout and r.returncode == 0
+    print(f"{'ok ' if ok else 'XX '} hook mode=smart exit={r.returncode} stdout={r.stdout[:80]!r}")
+    state_path.unlink(missing_ok=True)
+    return 0 if ok else 1
 
 
 def selftest():

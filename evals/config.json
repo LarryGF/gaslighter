@@ -2,7 +2,7 @@
   "defaults": {
     "runs": 3,
     "models": ["haiku", "sonnet"],
-    "arms": ["baseline", "gaslighter-off", "gaslighter-lite", "gaslighter-full", "nudge-prompt"],
+    "arms": ["baseline", "gaslighter-off", "gaslighter-lite", "gaslighter-full", "gaslighter-smart", "nudge-prompt"],
     "workers": 4,
     "timeout": 300
   }
