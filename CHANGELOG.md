@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.4.0](https://github.com/LarryGF/gaslighter/compare/v1.3.0...v1.4.0) (2026-07-06)
+
+
+### Features
+
+* **evals:** add smart mode to eval suite ([bd024a9](https://github.com/LarryGF/gaslighter/commit/bd024a9eb30753c977d52d872a74dab1e1e65059))
+
+
+### Bug Fixes
+
+* **capture:** filter synthetic prompts from request capture ([14c1a98](https://github.com/LarryGF/gaslighter/commit/14c1a983f5cf9a6cc6eeca1e920fa8699cd82216))
+
+
+### Documentation
+
+* **capture:** document synthetic prompt filter in CLAUDE.md ([966b292](https://github.com/LarryGF/gaslighter/commit/966b2920f6462b88f47812583d2b1fdc8f33fdea))
+
+
+### Miscellaneous
+
+* **evals:** update benchmark data with run 7 results ([25fc879](https://github.com/LarryGF/gaslighter/commit/25fc8796ad1fb1ac4b9cec22966b163ea70ad7d9))
+
 ## [1.3.0] - 2026-07-06
 
 ### Added
