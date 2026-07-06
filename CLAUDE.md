@@ -60,6 +60,14 @@ a `/slash-command`) — this survives compaction, which can drop the literal ori
 from context. Subsequent nudges (not the first — the request is still live in context on a
 turn's first stop) quote it verbatim ahead of the generic nudge text when present.
 
+The harness also fires `UserPromptSubmit` when a background task/agent notification is
+replayed into the transcript to resume the session — that text isn't user-authored, but it
+easily clears the 80-char/non-slash-command bar. Live-observed: a `<task-notification>` block
+got captured as `last_request` and was quoted back to the model on a later Stop as if it were
+the original ask. `isTrivialPrompt` also treats a prompt as trivial when it starts with
+`<task-notification`, `<system-reminder`, or `[SYSTEM NOTIFICATION` — the markers these
+synthetic replays open with.
+
 ## Structure
 
 - `agents/judge-agent.md` — judge sub-agent definition (rubrics, calibration)
