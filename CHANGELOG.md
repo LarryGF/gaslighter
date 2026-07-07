@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0](https://github.com/LarryGF/gaslighter/compare/v1.4.0...v1.5.0) (2026-07-07)
+
+
+### Features
+
+* **eval:** add buried constraints to hard-tasks suite ([dbf4a39](https://github.com/LarryGF/gaslighter/commit/dbf4a398f47052ed5eddc4e11b49595102300d45))
+
+
+### Bug Fixes
+
+* **eval:** read hook telemetry from debug log instead of state file ([fb2eba2](https://github.com/LarryGF/gaslighter/commit/fb2eba2188727b0cd84c50d8ace345d3c2b2d807))
+* **nudge:** reword overcorrection guard to allow cascade completion ([f95c7b8](https://github.com/LarryGF/gaslighter/commit/f95c7b827862e83b430708b34110013ec3426237))
+
 ## [1.4.0](https://github.com/LarryGF/gaslighter/compare/v1.3.0...v1.4.0) (2026-07-06)
 
 
