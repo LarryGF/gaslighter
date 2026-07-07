@@ -1,6 +1,6 @@
 {
   "name": "gaslighter",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Requirement completeness checker — nudges Claude to re-read the original request before finishing code changes.",
   "author": {
     "name": "LarryGF",
