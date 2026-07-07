@@ -182,8 +182,9 @@ if (require.main === module) {
 }
 
 var OVERCORRECTION_GUARD =
-  " Only fix what was actually asked — do NOT add unrequested features, refactors, tests, " +
-  "or \"improvements\" beyond the original scope.";
+  " Don't invent features, refactors, or tests nobody asked for. But completing the " +
+  "requested change everywhere it needs to happen — every call site, caller, serializer, " +
+  "or related file it touches — is part of the request, not extra scope.";
 
 var FIRST_NUDGE =
   "Hold on — are you absolutely sure you've addressed every single requirement " +
