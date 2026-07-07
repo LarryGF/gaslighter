@@ -207,23 +207,39 @@ def selftest():
 
 
 def _check_hook_fired(arm, session_id):
-    """Verify gaslighter hook actually fired. Returns (nudge_count, state_dict) or (0, None)."""
+    """Verify gaslighter hook actually fired. Returns (nudge_count, state_dict) or (0, None).
+
+    Reads the hook's GASLIGHTER_DEBUG log rather than its state file. gaslighter-cleanup.js's
+    SessionEnd hook unconditionally deletes state-{session_id}.json as soon as the session
+    ends (correct behavior for a real interactive session), but a one-shot `claude -p` eval
+    cell ends its session the instant the subprocess exits — before this check runs — so the
+    state file is always already gone by the time we look. The debug log isn't touched by
+    that cleanup and is the only record left. Confirmed via manual repro: the state file
+    approach reported 0/90 gaslighter-lite/full/smart cells as fired in run 20260706-195854,
+    even though the debug log showed hook_invoked+nudge_fired for every one of them.
+    """
     if not arm.startswith("gaslighter-") or arm == "gaslighter-off":
         return 0, None
     if not session_id:
         return 0, None
-    # lkb: --plugin-dir loads plugins as "session-only" and Claude Code suffixes
-    # their CLAUDE_PLUGIN_DATA dir with "-inline" (verified via --debug hooks),
-    # unlike the plain "gaslighter" dir used by a directly-invoked hook script.
-    data_dir = Path.home() / ".claude" / "plugins" / "data" / "gaslighter-inline"
-    state_path = data_dir / f"state-{session_id}.json"
-    if not state_path.exists():
+    # lkb: shared, ever-appending log across all sessions on the machine — fine at today's
+    # size (sub-MB), revisit with log rotation if it ever gets slow to scan.
+    debug_log = Path(tempfile.gettempdir()) / "gaslighter-debug.jsonl"
+    if not debug_log.exists():
         return 0, None
+    nudge_count = 0
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        return state.get("nudge_count", 0), state
+        with debug_log.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if entry.get("session") == session_id and entry.get("event") == "nudge_fired":
+                    nudge_count = max(nudge_count, entry.get("nudge_count", 0))
     except Exception:
         return 0, None
+    return nudge_count, None
 
 
 def score_workspace(task_id, arm, model, workdir):
