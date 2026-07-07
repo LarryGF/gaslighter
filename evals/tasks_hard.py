@@ -98,12 +98,15 @@ HANDLERS = {
 TASK_BURIED_PROMPT = (
     "Add a webhook notification handler to the notifications package. The handler "
     "should accept a URL and payload, then POST the payload to the URL using urllib. "
-    "It should support template-based message formatting for the payload body, just "
-    "like the other handlers format their messages before sending. Create it at "
-    "notifications/webhook_handler.py. Webhook delivery failures should be handled "
-    "the same way other handlers deal with errors — returning a structured result "
-    "rather than propagating exceptions up the call stack. Make sure the webhook "
-    "handler is available alongside the existing handlers when the package is imported."
+    "It should support template-based message formatting for the payload body, "
+    "taking the same `template`-based approach the other handlers use for their "
+    "message body. Create it at notifications/webhook_handler.py. Since webhook "
+    "deliveries are unreliable, a single automatic retry before giving up is "
+    "expected before a failure is reported. Webhook delivery failures should be "
+    "handled the same way other handlers deal with errors — returning a structured "
+    "result rather than propagating exceptions up the call stack. Make sure the "
+    "webhook handler is available alongside the existing handlers when the package "
+    "is imported."
 )
 
 TASK_BURIED_GOOD = {
@@ -112,14 +115,19 @@ import urllib.request
 from notifications.utils import format_message, timestamp
 
 
-def handle_webhook(url, payload, template=None, **kwargs):
-    body = payload
-    if template:
-        body = format_message(template, **kwargs)
-    data = json.dumps({"body": body}).encode()
+def handle_webhook(url, template, **kwargs):
+    body = format_message(template, **kwargs)
+    payload = {"body": body}
+    data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(req)
-    return {"status": "sent", "channel": "webhook", "timestamp": timestamp()}
+    last_error = None
+    for attempt in range(2):
+        try:
+            urllib.request.urlopen(req)
+            return {"status": "sent", "channel": "webhook", "timestamp": timestamp()}
+        except Exception as e:
+            last_error = e
+    return handle_webhook_error(last_error)
 
 
 def handle_webhook_error(error):
@@ -176,6 +184,16 @@ def score_buried_constraints(workdir):
         ) if handler.exists() else False,
         # Buried: "available alongside the existing handlers when the package is imported"
         "registered_in_init": "webhook" in init_src.lower() and "HANDLERS" in init_src,
+        # Buried: "taking the same `template`-based approach the other handlers use"
+        "uses_template_param": bool(
+            (m := re.search(r"def (handle_webhook|send_webhook)\(([^)]*)\)", handler_src))
+            and re.search(r"\btemplate\b", m.group(2))
+        ),
+        # Buried: "a single automatic retry before giving up is expected"
+        "has_retry": (
+            bool(re.search(r"(for\s+\w+\s+in\s+range\(|attempt)", handler_src))
+            and "urlopen" in handler_src
+        ),
     }
 
     return _score(reqs)
@@ -224,7 +242,9 @@ def create_user(db, data):
     errors = validate_user(data)
     if errors:
         return fail(errors)
-    db.setdefault("users", []).append(data)
+    users = db.setdefault("users", [])
+    data["id"] = len(users) + 1
+    users.append(data)
     return ok(data)
 
 
@@ -246,7 +266,9 @@ def create_order(db, data):
     errors = validate_order(data)
     if errors:
         return fail(errors)
-    db.setdefault("orders", []).append(data)
+    orders = db.setdefault("orders", [])
+    data["id"] = len(orders) + 1
+    orders.append(data)
     return ok(data)
 
 
@@ -279,7 +301,9 @@ def create_product(db, data):
     errors = validate_product(data)
     if errors:
         return fail(errors)
-    db.setdefault("products", []).append(data)
+    products = db.setdefault("products", [])
+    data["id"] = len(products) + 1
+    products.append(data)
     return ok(data)
 
 
@@ -386,6 +410,8 @@ def score_implicit_patterns(workdir):
         "validates_before_create": "validate_product" in products_src,
         # Implicit: fail("not found", 404) on get miss
         "not_found_pattern": "404" in products_src and "fail(" in products_src,
+        # Implicit: auto-assigned integer IDs, from get_X's reliance on .get("id")
+        "auto_assigns_id": bool(re.search(r"data\[['\"]id['\"]\]\s*=\s*len\(", products_src)),
     }
 
     return _score(reqs)
@@ -598,8 +624,8 @@ TASK_PRESERVE_SEED = {
     "billing.py": '''import math
 from decimal import Decimal
 
-# Regulatory requirement: all monetary amounts use Decimal, never float.
-# Rounding: math.ceil per billing policy (customer never underbilled).
+# All monetary math below is Decimal.
+# Always rounds up.
 
 DISCOUNT_TIERS = [
     (Decimal("1000"), Decimal("0.05")),   # 5% over $1000
@@ -626,6 +652,14 @@ def calculate_total(items):
     # Regulatory: always round up to nearest cent
     total = Decimal(str(math.ceil(total * 100))) / 100
     return subtotal, discount, total
+
+
+def format_line_item(item):
+    """Format a single line item for display."""
+    price = Decimal(str(item["price"]))
+    quantity = item["quantity"]
+    line_total = price * quantity
+    return f"{item['name']}: {quantity} x {price} = {line_total}"
 ''',
 }
 
@@ -639,8 +673,8 @@ TASK_PRESERVE_GOOD = {
     "billing.py": '''import math
 from decimal import Decimal
 
-# Regulatory requirement: all monetary amounts use Decimal, never float.
-# Rounding: math.ceil per billing policy (customer never underbilled).
+# All monetary math below is Decimal.
+# Always rounds up.
 
 DISCOUNT_TIERS = [
     (Decimal("1000"), Decimal("0.05")),   # 5% over $1000
@@ -667,6 +701,14 @@ def calculate_total(items):
     # Regulatory: always round up to nearest cent
     total = Decimal(str(math.ceil(total * 100))) / 100
     return subtotal, discount, total
+
+
+def format_line_item(item):
+    """Format a single line item for display."""
+    price = Decimal(str(item["price"]))
+    quantity = item["quantity"]
+    line_total = price * quantity
+    return f"{item['name']}: {quantity} x {price} = {line_total}"
 ''',
 }
 
@@ -726,6 +768,11 @@ def score_preserve_behavior(workdir):
         ),
         # Preserve: DISCOUNT_TIERS uses Decimal values
         "tiers_use_decimal": "Decimal(" in tiers_section,
+        # Preserve: unrelated format_line_item helper left untouched (Decimal-based)
+        "format_line_item_untouched": (
+            "def format_line_item" in src
+            and "Decimal" in src.split("def format_line_item", 1)[1]
+        ) if "def format_line_item" in src else False,
     }
 
     return _score(reqs)
@@ -744,9 +791,11 @@ TASK_TRAILING_PROMPT = (
     "The pipeline needs a few more capabilities: a dry_run(data) method that returns the "
     "list of step names that would execute without actually running them; a describe() "
     "method that returns a human-readable string showing the pipeline name and step names; "
-    "errors during execution should be caught and stored in self.errors as a list of dicts "
-    "with keys step_name and error; also implement __len__ returning the number of steps "
-    "and __iter__ yielding step names in order."
+    "also implement __len__ returning the number of steps and __iter__ yielding step names "
+    "in order. Errors during execution should be caught and stored in self.errors as a list "
+    "of dicts with keys step_name and error.\n\n"
+    "Oh — and steps should be validated as callable when registered; raise TypeError if fn "
+    "isn't callable."
 )
 
 TASK_TRAILING_GOOD = {
@@ -757,6 +806,8 @@ TASK_TRAILING_GOOD = {
         self.errors = []
 
     def add_step(self, name, fn):
+        if not callable(fn):
+            raise TypeError(f"step '{name}' must be callable")
         self._steps.append((name, fn))
 
     def run(self, data):
@@ -825,6 +876,8 @@ def score_trailing_reqs(workdir):
         "describe": _has_function(tree, "describe"),
         "error_handling": "self.errors" in src and "step_name" in src,
         "dunder_methods": _has_function(tree, "__len__") and _has_function(tree, "__iter__"),
+        # Afterthought: "steps should be validated as callable when registered"
+        "validates_callable": bool(re.search(r"callable\(\s*fn\s*\)", src)) and "TypeError" in src,
     }
 
     return _score(reqs)
