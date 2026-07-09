@@ -107,6 +107,12 @@ export GASLIGHTER_MAX_NUDGES=5     # a number, or infinite / unlimited / -1
 
 Env var beats persisted config beats mode default, for mode and cap independently.
 
+`smart` mode's backing model and CLI are configurable via `GASLIGHTER_SMART_MODEL` / `GASLIGHTER_SMART_CMD` (or the `smartModel` / `smartCmd` config keys); they default to the `claude` binary at Haiku.
+
+### OpenCode
+
+gaslighter also runs under [OpenCode](https://opencode.ai) from the same decision engine — only the I/O differs (`session.idle` instead of the Stop hook, a follow-up prompt instead of a block). See [opencode/README.md](opencode/README.md) for install and the small behavioral differences.
+
 ### Uninstall
 
 ```
@@ -127,7 +133,8 @@ That leaves the persisted config and session state behind in `~/.claude/plugins/
 ## Development
 
 ```bash
-node tests/test-nudge-decision.js   # unit tests for the hook logic
+node tests/test-nudge-decision.js   # Claude adapter + hook logic
+node tests/test-agnostic.js         # shared core, env/store, OpenCode adapter
 
 cd evals
 python3 run.py --selftest           # validate scorers against reference solutions, no API spend
