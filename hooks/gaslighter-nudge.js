@@ -146,7 +146,7 @@ if (require.main === module) {
       } else {
         // Check failed/unavailable: never crash, never block on it — fall
         // back to lite-style delivery of the standard nudge.
-        var fallbackNudge = isFirst ? FIRST_NUDGE : buildSubsequentNudge(state.last_request && state.last_request.prompt);
+        var fallbackNudge = isFirst ? FIRST_NUDGE : SUBSEQUENT_NUDGE;
         var fallbackOut = { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: fallbackNudge } };
         if (getQuiet('lite', cfg)) fallbackOut.suppressOutput = true;
         process.stdout.write(JSON.stringify(fallbackOut));
@@ -157,7 +157,7 @@ if (require.main === module) {
     state.nudge_count = (state.nudge_count || 0) + 1;
     saveState(state, sessionId);
 
-    var nudge = isFirst ? FIRST_NUDGE : buildSubsequentNudge(state.last_request && state.last_request.prompt);
+    var nudge = isFirst ? FIRST_NUDGE : SUBSEQUENT_NUDGE;
     var quiet = getQuiet(mode, cfg);
 
     debugLog('nudge_fired', { nudge_count: state.nudge_count, mode: mode, session: sessionId });
@@ -198,15 +198,6 @@ var SUBSEQUENT_NUDGE =
   "say so explicitly and finish. If anything is missing, fix it now." +
   OVERCORRECTION_GUARD;
 
-// Embeds the Phase-3 captured original request (ground truth surviving
-// compaction) ahead of the generic subsequent-nudge text when present;
-// FIRST_NUDGE stays generic since the request is still live in context on a
-// turn's first stop.
-function buildSubsequentNudge(lastRequestPrompt) {
-  if (!lastRequestPrompt) return SUBSEQUENT_NUDGE;
-  return "The original request was:\n---\n" + lastRequestPrompt + "\n---\n" +
-    "Verify every requirement in it is implemented.\n\n" + SUBSEQUENT_NUDGE;
-}
 
 var MODE_DEFAULT_MAX = { off: 0, lite: 3, full: Infinity, smart: 2 };
 
@@ -473,7 +464,7 @@ function saveConfig(cfg) {
 // Exported for testing
 if (typeof module !== 'undefined') {
   module.exports = {
-    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, buildSubsequentNudge, confidenceDeclared, lastAssistantText, analyzeLastTurn, waitForTurn,
+    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, analyzeLastTurn, waitForTurn,
     loadConfig, saveConfig, getConfigPath, getMaxNudges, MODE_DEFAULT_MAX, getQuiet, getNudgeOnReadOnly, getStatePath, getDataDir,
     firstUserMessage, buildSmartCheckPrompt, parseSmartOutput, runSmartCheck
   };

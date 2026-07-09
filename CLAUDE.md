@@ -56,17 +56,14 @@ restores nudging on the first Stop even when the turn made no file-modifying too
 
 A `UserPromptSubmit` hook (`hooks/gaslighter-capture.js`) writes the user's prompt into
 session state (`last_request: {prompt, ts}`) whenever it's non-trivial (≥80 chars, and not
-a `/slash-command`) — this survives compaction, which can drop the literal original ask
-from context. Subsequent nudges (not the first — the request is still live in context on a
-turn's first stop) quote it verbatim ahead of the generic nudge text when present.
+a `/slash-command`) — this survives compaction. The captured prompt is stored but no longer
+quoted back in nudge text (removed: nudges now use only the generic `SUBSEQUENT_NUDGE`).
 
 The harness also fires `UserPromptSubmit` when a background task/agent notification is
 replayed into the transcript to resume the session — that text isn't user-authored, but it
-easily clears the 80-char/non-slash-command bar. Live-observed: a `<task-notification>` block
-got captured as `last_request` and was quoted back to the model on a later Stop as if it were
-the original ask. `isTrivialPrompt` also treats a prompt as trivial when it starts with
-`<task-notification`, `<system-reminder`, or `[SYSTEM NOTIFICATION` — the markers these
-synthetic replays open with.
+easily clears the 80-char/non-slash-command bar. `isTrivialPrompt` treats a prompt as
+trivial when it starts with `<task-notification`, `<system-reminder`, or `[SYSTEM NOTIFICATION`
+— the markers these synthetic replays open with.
 
 ## Structure
 

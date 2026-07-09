@@ -945,41 +945,6 @@ test('capture: truncates to 2000 chars', function () {
   assert.strictEqual(state.last_request.prompt.length, 2000);
 });
 
-// --- buildSubsequentNudge ---
-
-test('buildSubsequentNudge: falls back to generic SUBSEQUENT_NUDGE when no request captured', function () {
-  assert.strictEqual(nudge.buildSubsequentNudge(undefined), nudge.SUBSEQUENT_NUDGE);
-  assert.strictEqual(nudge.buildSubsequentNudge(''), nudge.SUBSEQUENT_NUDGE);
-});
-
-test('buildSubsequentNudge: embeds the captured request when present', function () {
-  var text = nudge.buildSubsequentNudge('Add a widget endpoint.');
-  assert.ok(text.includes('The original request was:'));
-  assert.ok(text.includes('Add a widget endpoint.'));
-  assert.ok(text.includes('Verify every requirement in it is implemented.'));
-  assert.ok(text.includes('One more check')); // still includes the generic body
-});
-
-test('end-to-end: subsequent nudge embeds the captured request from state', function () {
-  var sessionId = 'test-e2e-capture-' + Date.now();
-  var dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-state-'));
-  fs.writeFileSync(path.join(dataDir, 'state-' + sessionId + '.json'), JSON.stringify({
-    nudge_count: 1, turn_count: 1, last_request: { prompt: 'Add a widget endpoint.', ts: Date.now() }
-  }));
-  var transcript = writeTranscript([
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: {} }] } },
-    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] } },
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Applied the fix.' }] } }
-  ]);
-  var env = Object.assign({}, process.env, { GASLIGHTER_MODE: 'lite', CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: sessionId });
-  var result = spawnSync(process.execPath, [path.join(__dirname, '..', 'hooks', 'gaslighter-nudge.js')], {
-    input: JSON.stringify({ session_id: sessionId, transcript_path: transcript }),
-    env: env,
-    encoding: 'utf8'
-  });
-  var out = JSON.parse(result.stdout);
-  assert.ok(out.hookSpecificOutput.additionalContext.includes('Add a widget endpoint.'));
-});
 
 // --- Phase 2: smart mode ---
 
