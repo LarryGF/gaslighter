@@ -1,9 +1,9 @@
 {
   "defaults": {
-    "runs": 3,
-    "models": ["haiku", "sonnet"],
-    "arms": ["baseline", "gaslighter-off", "gaslighter-lite", "gaslighter-full", "gaslighter-smart", "nudge-prompt"],
-    "workers": 4,
+    "runs": 2,
+    "models": ["haiku"],
+    "arms": ["baseline", "gaslighter-lite", "gaslighter-full"],
+    "workers": 8,
     "timeout": 300
   }
 }
