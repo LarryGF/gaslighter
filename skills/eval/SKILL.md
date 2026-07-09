@@ -53,9 +53,9 @@ Runs the gaslighter evaluation suite using `evals/run.py`:
 - Workers: 8
 - Timeout: 300s per cell
 - Runs: 2
-- Models: `["haiku"]`
+- Models: `["haiku", "sonnet"]`
 - Arms: `["baseline", "gaslighter-lite", "gaslighter-full"]`
-- Default matrix: 8 tasks × 1 model × 3 arms × 2 runs = **48 cells**. Use `--all --arms ... --models haiku,sonnet` to widen.
+- Default matrix: 8 tasks × 2 models × 3 arms × 2 runs = **96 cells**. Use `--all --arms ...` to widen further.
 
 ## Implementation Instructions
 

@@ -1,7 +1,7 @@
 {
   "defaults": {
     "runs": 2,
-    "models": ["haiku"],
+    "models": ["haiku", "sonnet"],
     "arms": ["baseline", "gaslighter-lite", "gaslighter-full"],
     "workers": 8,
     "timeout": 300
