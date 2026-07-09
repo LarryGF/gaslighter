@@ -5,6 +5,7 @@
 var fs = require('fs');
 var path = require('path');
 var nudge = require('./gaslighter-nudge');
+var env = require('./lib/env');
 
 var MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -13,7 +14,7 @@ process.stdin.on('data', function (chunk) { input += chunk; });
 process.stdin.on('end', function () {
   try {
     var payload = JSON.parse(input.replace(/^﻿/, ''));
-    var sessionId = payload.session_id || process.env.CLAUDE_SESSION_ID || 'unknown';
+    var sessionId = env.resolveSessionId(payload);
     var dataDir = nudge.getDataDir();
 
     try { fs.unlinkSync(nudge.getStatePath(sessionId)); } catch (e) {}

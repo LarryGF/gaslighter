@@ -5,6 +5,7 @@
 // context verbatim, and it's ground truth for a future LLM-gated check).
 
 var nudge = require('./gaslighter-nudge');
+var env = require('./lib/env');
 
 var TRIVIAL_MIN_LENGTH = 80;
 var CAPTURE_MAX_LENGTH = 2000;
@@ -36,7 +37,7 @@ if (require.main === module) {
   process.stdin.on('end', function () {
     try {
       var payload = JSON.parse(input.replace(/^﻿/, ''));
-      var sessionId = payload.session_id || process.env.CLAUDE_SESSION_ID || 'unknown';
+      var sessionId = env.resolveSessionId(payload);
       var prompt = payload.prompt || '';
       if (!isTrivialPrompt(prompt)) {
         var state = nudge.loadState(sessionId);
