@@ -51,9 +51,11 @@ def source_text(workdir):
 def collect(run_dir):
     """Collect workspace data for judging. Returns list of workspace dicts."""
     run_dir = _resolve(run_dir)
-    ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    ws_dir = run_dir / "workspaces"
     if not ws_dir.exists():
-        ws_dir = run_dir  # older runs kept workspaces alongside results.json
+        ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    if not ws_dir.exists():
+        ws_dir = run_dir  # oldest runs kept workspaces alongside results.json
 
     workspaces = []
     for ws in sorted(p for p in ws_dir.iterdir() if p.is_dir()):
