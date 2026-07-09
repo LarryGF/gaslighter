@@ -122,7 +122,6 @@ def check_plugin():
     if not hook.exists():
         print(f"XX  hook script not found: {hook}")
         return 1
-    data_dir = Path.home() / ".claude" / "plugins" / "data" / "gaslighter"
     # lite delivers a non-blocking nudge via additionalContext, full hard-blocks via
     # decision:block, both on stdout + exit 0 (stderr/exit-code protocol is broken, see docs)
     checks = {
@@ -130,19 +129,22 @@ def check_plugin():
         "full": lambda out: '"decision":"block"' in out.replace(" ", ""),
         "off": lambda out: out.strip() == "",
     }
-    for mode, check in checks.items():
-        sid = f"selftest-plugin-{mode}"
-        state_path = data_dir / f"state-{sid}.json"
-        state_path.unlink(missing_ok=True)
-        # no transcript_path in the payload here, so bypass Phase 1.1's edit-activity gate
-        env = {**os.environ, "GASLIGHTER_MODE": mode, "CLAUDE_SESSION_ID": sid,
-               "GASLIGHTER_NUDGE_ON_READONLY": "1"}
-        r = subprocess.run(["node", str(hook)], input="{}", capture_output=True, text=True, env=env)
-        ok = check(r.stdout) and r.returncode == 0
-        print(f"{'ok ' if ok else 'XX '} hook mode={mode:<5} exit={r.returncode} stdout={r.stdout[:80]!r}")
-        failures += 0 if ok else 1
-        state_path.unlink(missing_ok=True)
-    failures += _check_smart(hook, data_dir)
+    # Hermetic data dir: the hook resolves GASLIGHTER_DATA_DIR ahead of anything
+    # else (see hooks/lib/env.js), so pointing it at a throwaway dir keeps
+    # selftest state out of the real store and guarantees a clean nudge_count=0
+    # start for the first-nudge assertions — no hardcoded ~/.claude path needed.
+    with tempfile.TemporaryDirectory() as data_dir:
+        for mode, check in checks.items():
+            sid = f"selftest-plugin-{mode}"
+            # no transcript_path in the payload here, so bypass Phase 1.1's edit-activity gate
+            env = {**os.environ, "GASLIGHTER_DATA_DIR": data_dir,
+                   "GASLIGHTER_MODE": mode, "CLAUDE_SESSION_ID": sid,
+                   "GASLIGHTER_NUDGE_ON_READONLY": "1"}
+            r = subprocess.run(["node", str(hook)], input="{}", capture_output=True, text=True, env=env)
+            ok = check(r.stdout) and r.returncode == 0
+            print(f"{'ok ' if ok else 'XX '} hook mode={mode:<5} exit={r.returncode} stdout={r.stdout[:80]!r}")
+            failures += 0 if ok else 1
+        failures += _check_smart(hook, data_dir)
     return failures
 
 
@@ -151,9 +153,8 @@ def _check_smart(hook, data_dir):
     # the input="{}" modes above). A deliberately-missing GASLIGHTER_SMART_CMD
     # forces the fail-quiet fallback to a plain lite-style nudge — verifies the
     # protocol without spending an API call on the real Haiku check.
+    # data_dir is the caller's hermetic GASLIGHTER_DATA_DIR (a str temp path).
     sid = "selftest-plugin-smart"
-    state_path = data_dir / f"state-{sid}.json"
-    state_path.unlink(missing_ok=True)
     turn = [
         {"type": "user", "message": {"role": "user", "content": "Add a widget endpoint with validation."}},
         {"type": "assistant", "uuid": "u1", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Edit", "input": {}}]}},
@@ -163,14 +164,14 @@ def _check_smart(hook, data_dir):
     with tempfile.TemporaryDirectory() as d:
         tp = Path(d) / "transcript.jsonl"
         tp.write_text("\n".join(json.dumps(e) for e in turn) + "\n", encoding="utf-8")
-        env = {**os.environ, "GASLIGHTER_MODE": "smart", "CLAUDE_SESSION_ID": sid,
+        env = {**os.environ, "GASLIGHTER_DATA_DIR": str(data_dir),
+               "GASLIGHTER_MODE": "smart", "CLAUDE_SESSION_ID": sid,
                "GASLIGHTER_SMART_CMD": "/nonexistent/gaslighter-smart-selftest",
                "GASLIGHTER_FLUSH_WAIT_MS": "1000"}
         payload = json.dumps({"session_id": sid, "transcript_path": str(tp)})
         r = subprocess.run(["node", str(hook)], input=payload, capture_output=True, text=True, env=env)
     ok = '"additionalContext"' in r.stdout and '"decision"' not in r.stdout and r.returncode == 0
     print(f"{'ok ' if ok else 'XX '} hook mode=smart exit={r.returncode} stdout={r.stdout[:80]!r}")
-    state_path.unlink(missing_ok=True)
     return 0 if ok else 1
 
 
@@ -386,9 +387,11 @@ def rescore(run_dir):
     run_dir = Path(run_dir)
     if not run_dir.exists():
         run_dir = RUNS_DIR / run_dir.name
-    ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    ws_dir = run_dir / "workspaces"
     if not ws_dir.exists():
-        ws_dir = run_dir  # older runs kept workspaces alongside results.json
+        ws_dir = Path(tempfile.gettempdir()) / "gaslighter-evals" / run_dir.name
+    if not ws_dir.exists():
+        ws_dir = run_dir  # oldest runs kept workspaces alongside results.json
     results = []
     for ws in sorted(p for p in ws_dir.iterdir() if p.is_dir()):
         parts = ws.name.split("__")
@@ -462,13 +465,15 @@ def main():
     models_str = args.model or args.models or ",".join(cfg.get("models", ["haiku"]))
     models = [m.strip() for m in models_str.split(",")]
     runs = args.runs if args.runs is not None else cfg.get("runs", 1)
-    workers = args.workers if args.workers is not None else cfg.get("workers", 4)
+    workers = args.workers if args.workers is not None else cfg.get("workers", 8)
     timeout = args.timeout if args.timeout is not None else cfg.get("timeout", CELL_TIMEOUT)
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = RUNS_DIR / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
-    workspace_root = Path(tempfile.gettempdir()) / "gaslighter-evals" / stamp
+    # Persist workspaces alongside results (runs/ is gitignored) so --rescore
+    # survives a reboot/tmp-clean; old runs used tempdir and are unrescorable.
+    workspace_root = out_dir / "workspaces"
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     cells = [(tid, arm, model, r)
