@@ -24,6 +24,12 @@ function validate(cfg) {
   if (cfg.nudgeOnReadOnly !== undefined && typeof cfg.nudgeOnReadOnly !== 'boolean') {
     throw new Error('nudgeOnReadOnly must be a boolean');
   }
+  if (cfg.smartModel !== undefined && (typeof cfg.smartModel !== 'string' || !cfg.smartModel)) {
+    throw new Error('smartModel must be a non-empty string');
+  }
+  if (cfg.smartCmd !== undefined && (typeof cfg.smartCmd !== 'string' || !cfg.smartCmd)) {
+    throw new Error('smartCmd must be a non-empty string');
+  }
 }
 
 var args = process.argv.slice(2);
