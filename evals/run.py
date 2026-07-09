@@ -282,8 +282,14 @@ def run_cell(task_id, arm, model, workdir, timeout=CELL_TIMEOUT):
     if not claude:
         sys.exit("claude CLI not found on PATH")
 
+    # --bare can't be used here: it unconditionally skips hooks, even with an
+    # explicit --plugin-dir, which would silently zero out every gaslighter-*
+    # arm. This is the verified substitute — same clean-room effect (no
+    # operator CLAUDE.md, no other installed plugins, no MCP, no built-in
+    # skills) without touching hooks, so the plugin under test still fires.
     cmd = [claude, "-p", task["prompt"], "--model", MODELS[model],
-           "--permission-mode", "bypassPermissions", "--output-format", "json"]
+           "--permission-mode", "bypassPermissions", "--output-format", "json",
+           "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands"]
 
     append = NO_RUN
     env = os.environ.copy()
@@ -352,18 +358,28 @@ def print_table(rows):
     for model, mrs in sorted(by_model.items()):
         n = mrs[0]["n"]
         print(f"\n## {model} (n={n})\n")
-        print("| Task | Arm | Correct | Complete | LOC | Turns | $/run |")
-        print("|------|-----|---------|----------|-----|-------|-------|")
+        print("| Task | Arm | Δ Complete | Δ Correct | Complete | Correct | LOC | Turns | $/run |")
+        print("|------|-----|-----------|----------|----------|---------|-----|-------|-------|")
         by_task = defaultdict(list)
         for r in mrs:
             by_task[r["task"]].append(r)
         for task in sorted(by_task):
-            for r in sorted(by_task[task], key=lambda x: x["arm"]):
+            task_rows = by_task[task]
+            baseline = next((r for r in task_rows if r["arm"] == "baseline"), None)
+            b_complete = baseline["complete_rate_mean"] if baseline else None
+            b_correct = baseline["correct_rate"] if baseline else None
+            for r in sorted(task_rows, key=lambda x: x["arm"]):
                 c = f"${r['cost_mean']:.4f}" if r["cost_mean"] is not None else "-"
                 t = r.get("turns_mean")
                 t_s = f"{t:.1f}" if t is not None else "-"
-                print(f"| {task} | {r['arm']} | {r['correct_rate']} | "
-                      f"{r['complete_rate_mean']} | {r['total_loc_median']:.0f} | {t_s} | {c} |")
+                if r["arm"] == "baseline" or b_complete is None:
+                    d_c, d_r = "(ref)", "(ref)"
+                else:
+                    d_c = f"{r['complete_rate_mean'] - b_complete:+.2f}"
+                    d_r = f"{r['correct_rate'] - b_correct:+.2f}"
+                print(f"| {task} | {r['arm']} | {d_c} | {d_r} | "
+                      f"{r['complete_rate_mean']} | {r['correct_rate']} | "
+                      f"{r['total_loc_median']:.0f} | {t_s} | {c} |")
 
 
 def rescore(run_dir):
