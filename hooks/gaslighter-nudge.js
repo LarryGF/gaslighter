@@ -1,258 +1,68 @@
 #!/usr/bin/env node
-// gaslighter v1.0 — Stop hook
-// Check if active, anti-loop guard, emit psychologically effective nudge.
+// gaslighter — Claude Code Stop hook (adapter).
+//
+// This file is the Claude Code *adapter* over the harness-agnostic core in
+// ./lib. Its responsibilities are Claude-specific only:
+//   - read the Stop hook payload from stdin
+//   - parse Claude's JSONL transcript into an abstract "turn"
+//   - run the smart check via the `claude` CLI
+//   - translate the core's abstract plan into Claude's Stop-hook output shape
+//     (decision:"block" | hookSpecificOutput.additionalContext + suppressOutput)
+// All decision logic lives in ./lib/core.js and ./lib/engine.js and is shared
+// with the OpenCode adapter. Persistence/paths come from ./lib/store.js and
+// ./lib/env.js, which resolve generic GASLIGHTER_* vars before Claude's.
+
+'use strict';
 
 var fs = require('fs');
 var path = require('path');
 var os = require('os');
 var execFileSync = require('child_process').execFileSync;
 
+var engine = require('./lib/engine');
+var env = require('./lib/env');
+var createStore = require('./lib/store').createStore;
+var core = require('./lib/core');
+
 var DEBUG_LOG = process.env.GASLIGHTER_DEBUG ? path.join(os.tmpdir(), 'gaslighter-debug.jsonl') : null;
 function debugLog(event, extra) {
   if (!DEBUG_LOG) return;
   try {
-    var line = JSON.stringify(Object.assign({ ts: Date.now(), event: event, session: (extra && extra.session) || process.env.CLAUDE_SESSION_ID || 'unknown' }, extra || {})) + '\n';
+    var line = JSON.stringify(Object.assign({ ts: Date.now(), event: event, session: (extra && extra.session) || env.resolveSessionId() }, extra || {})) + '\n';
     fs.appendFileSync(DEBUG_LOG, line);
   } catch (e) {}
 }
 
-// Guard against side effects when required as a library (e.g. by
-// gaslighter-cleanup.js for its getDataDir/getStatePath helpers): attaching
-// these stdin listeners unconditionally would race the requiring script's
-// own stdin handling and call process.exit(0) out from under it.
-if (require.main === module) {
-  var input = '';
-  process.stdin.on('data', function (chunk) { input += chunk; });
-  process.stdin.on('end', function () {
-  try {
-    var payload = JSON.parse(input.replace(/^﻿/, ''));
-    var sessionId = payload.session_id || process.env.CLAUDE_SESSION_ID || 'unknown';
+// --- persistence (agnostic store bound to the resolved data dir per call, so
+// tests that flip CLAUDE_PLUGIN_DATA/GASLIGHTER_DATA_DIR between calls see it) ---
+function store() { return createStore(env.resolveDataDir()); }
+function getDataDir() { return store().getDataDir(); }
+function getStatePath(sessionId) { return store().getStatePath(env.resolveSessionId(sessionId)); }
+function loadState(sessionId) { return store().loadState(env.resolveSessionId(sessionId)); }
+function saveState(state, sessionId) { return store().saveState(state, env.resolveSessionId(sessionId)); }
+function getConfigPath() { return store().getConfigPath(); }
+function loadConfig() { return store().loadConfig(); }
+function saveConfig(cfg) { return store().saveConfig(cfg); }
 
-    var cfg = loadConfig(); // read once per invocation, pass through below
-    var mode = getMode(cfg);
-    debugLog('hook_invoked', { mode: mode, session: sessionId });
+// --- config resolution (thin wrappers preserving the zero/one-arg API) ---
+function getMode(cfg) { return engine.resolveMode(cfg || loadConfig()); }
+function getQuiet(mode, cfg) { return engine.resolveQuiet(mode, cfg || loadConfig()); }
+function getNudgeOnReadOnly(cfg) { return engine.resolveNudgeOnReadOnly(cfg || loadConfig()); }
+function getMaxNudges(mode, cfg) { return engine.resolveMaxNudges(mode, cfg || loadConfig()); }
 
-    if (mode === 'off') { debugLog('exit_mode_off'); process.exit(0); }
+// Re-exported text/predicate for back-compat.
+var FIRST_NUDGE = engine.FIRST_NUDGE;
+var SUBSEQUENT_NUDGE = engine.SUBSEQUENT_NUDGE;
+var MODE_DEFAULT_MAX = engine.MODE_DEFAULT_MAX;
+var confidenceDeclared = engine.confidenceDeclared;
+var buildSmartCheckPrompt = engine.buildSmartCheckPrompt;
+var parseSmartOutput = engine.parseSmartOutput;
 
-    // Session is pausing for background work (a backgrounded Bash command, a
-    // spawned subagent, a scheduled cron), not actually finishing — nudging
-    // here is premature and untracked (we'd never see whether the model acts
-    // on it before the real stop). Available since Claude Code v2.1.145;
-    // undefined on older CLI versions, which is treated as "nothing pending".
-    var pendingBackgroundWork = (payload.background_tasks && payload.background_tasks.length > 0) ||
-      (payload.session_crons && payload.session_crons.length > 0);
-    if (pendingBackgroundWork) {
-      debugLog('exit_background_pending', {
-        session: sessionId,
-        tasks: (payload.background_tasks || []).length,
-        crons: (payload.session_crons || []).length
-      });
-      process.exit(0);
-    }
-
-    var state = loadState(sessionId);
-    state.turn_count = (state.turn_count || 0) + 1;
-
-    if ((state.nudge_count || 0) >= getMaxNudges(mode, cfg)) { saveState(state, sessionId); process.exit(0); }
-
-    var isFirst = (state.nudge_count || 0) === 0;
-
-    // stop_hook_active true means the harness itself considers this a
-    // continuation of a prior Stop-hook block; nudge_count===0 alongside
-    // that means our own state file is missing/mismatched (e.g. wrong data
-    // dir). Don't fire FIRST_NUDGE again — treat it as a continuation.
-    if (isFirst && payload.stop_hook_active === true) {
-      debugLog('state_mismatch', { session: sessionId });
-      isFirst = false;
-    }
-
-    var flushWaitMs = parseInt(process.env.GASLIGHTER_FLUSH_WAIT_MS, 10) || 5000;
-    var turn;
-
-    if (!isFirst) {
-      turn = waitForTurn(payload.transcript_path, flushWaitMs, state.last_turn_uuid);
-      // Couldn't observe a fully-flushed turn in time: stay quiet. Nudging
-      // blind is what caused infinite full-mode loops (observed live: the
-      // harness flushes the final text entry ~200ms AFTER the Stop hook
-      // starts, so an unwaited read sees the previous turn or nothing).
-      if (!turn) {
-        debugLog('exit_flush_timeout', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-      state.last_turn_uuid = turn.uuid;
-      if (confidenceDeclared(turn.text)) {
-        debugLog('exit_confidence_declared', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-      // Model answered a nudge without a single tool call: it re-checked and
-      // changed nothing, so another identical nudge is pure noise. Stop here
-      // regardless of how the model phrased its confirmation.
-      if (!turn.usedTools) {
-        debugLog('exit_no_tool_activity', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-    } else if (!getNudgeOnReadOnly(cfg)) {
-      // First nudge on a pure Q&A turn (no Edit/Write/NotebookEdit/Bash) is
-      // noise — re-reading requirements only matters once something changed.
-      turn = waitForTurn(payload.transcript_path, flushWaitMs, state.last_turn_uuid);
-      if (!turn) {
-        debugLog('exit_flush_timeout', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-      state.last_turn_uuid = turn.uuid;
-      if (!turn.editedFiles) {
-        debugLog('exit_no_edit_activity', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-    }
-
-    // Smart mode needs the last turn's text for its check prompt even on a
-    // first-nudge path that skipped waitForTurn above (nudgeOnReadOnly=true).
-    if (mode === 'smart' && !turn) {
-      turn = waitForTurn(payload.transcript_path, flushWaitMs, state.last_turn_uuid);
-      if (!turn) {
-        debugLog('exit_flush_timeout', { nudge_count: state.nudge_count, session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-      state.last_turn_uuid = turn.uuid;
-    }
-
-    if (mode === 'smart') {
-      var check = runSmartCheck(payload, state, turn);
-      if (check.status === 'ok') {
-        debugLog('smart_ok', { session: sessionId });
-        saveState(state, sessionId);
-        process.exit(0);
-      }
-      if (check.status === 'failed') {
-        debugLog('smart_check_failed', { session: sessionId, error: check.error });
-      }
-
-      state.nudge_count = (state.nudge_count || 0) + 1;
-      saveState(state, sessionId);
-      debugLog('nudge_fired', { nudge_count: state.nudge_count, mode: mode, session: sessionId, smart_status: check.status });
-
-      if (check.status === 'gap') {
-        process.stdout.write(JSON.stringify({
-          decision: 'block',
-          reason: 'Requirement check flagged gaps: ' + check.reason + '. Fix only these — do not add anything unrequested.'
-        }));
-      } else {
-        // Check failed/unavailable: never crash, never block on it — fall
-        // back to lite-style delivery of the standard nudge.
-        var fallbackNudge = isFirst ? FIRST_NUDGE : SUBSEQUENT_NUDGE;
-        var fallbackOut = { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: fallbackNudge } };
-        if (getQuiet('lite', cfg)) fallbackOut.suppressOutput = true;
-        process.stdout.write(JSON.stringify(fallbackOut));
-      }
-      process.exit(0);
-    }
-
-    state.nudge_count = (state.nudge_count || 0) + 1;
-    saveState(state, sessionId);
-
-    var nudge = isFirst ? FIRST_NUDGE : SUBSEQUENT_NUDGE;
-    var quiet = getQuiet(mode, cfg);
-
-    debugLog('nudge_fired', { nudge_count: state.nudge_count, mode: mode, session: sessionId });
-    if (mode === 'lite') {
-      var out = { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: nudge } };
-      if (quiet) out.suppressOutput = true;
-      process.stdout.write(JSON.stringify(out));
-    } else {
-      var cap = getMaxNudges(mode, cfg);
-      process.stdout.write(JSON.stringify({
-        decision: 'block',
-        reason: nudge,
-        systemMessage: 'gaslighter: verifying completeness (nudge ' + state.nudge_count + '/' + (cap === Infinity ? 'unlimited' : cap) + ')'
-      }));
-    }
-    process.exit(0);
-  } catch (e) {
-    debugLog('hook_error', { error: e.message });
-    process.exit(0);
-  }
-  });
-}
-
-var OVERCORRECTION_GUARD =
-  " Don't invent features, refactors, or tests nobody asked for. But completing the " +
-  "requested change everywhere it needs to happen — every call site, caller, serializer, " +
-  "or related file it touches — is part of the request, not extra scope.";
-
-var FIRST_NUDGE =
-  "Hold on — are you absolutely sure you've addressed every single requirement " +
-  "from the original request? Don't just assume you did. Go back, re-read what was asked, " +
-  "and confirm each point is actually implemented. If anything is missing, fix it now." +
-  OVERCORRECTION_GUARD;
-
-var SUBSEQUENT_NUDGE =
-  "One more check — go back to the original request and verify every requirement " +
-  "is implemented. If after re-reading you are 100% certain everything is covered, " +
-  "say so explicitly and finish. If anything is missing, fix it now." +
-  OVERCORRECTION_GUARD;
-
-
-var MODE_DEFAULT_MAX = { off: 0, lite: 3, full: Infinity, smart: 2 };
-
-function getMode(cfg) {
-  return (process.env.GASLIGHTER_MODE || (cfg || loadConfig()).mode || 'lite').toLowerCase();
-}
-
-function parseBool(value, fallback) {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === 'boolean') return value;
-  var s = String(value).toLowerCase();
-  if (s === '1' || s === 'true') return true;
-  if (s === '0' || s === 'false') return false;
-  return fallback;
-}
-
-function getQuiet(mode, cfg) {
-  var envVal = process.env.GASLIGHTER_QUIET;
-  if (envVal !== undefined) return parseBool(envVal, mode === 'lite');
-  cfg = cfg || loadConfig();
-  if (cfg.quiet !== undefined) return parseBool(cfg.quiet, mode === 'lite');
-  return mode === 'lite';
-}
-
-function getNudgeOnReadOnly(cfg) {
-  var envVal = process.env.GASLIGHTER_NUDGE_ON_READONLY;
-  if (envVal !== undefined) return parseBool(envVal, false);
-  cfg = cfg || loadConfig();
-  return parseBool(cfg.nudgeOnReadOnly, false);
-}
-
-function parseMaxNudges(value) {
-  if (value === 'infinite' || value === 'unlimited' || value === -1 || value === '-1') return Infinity;
-  var n = parseInt(value, 10);
-  return isNaN(n) ? undefined : n;
-}
-
-function getMaxNudges(mode, cfg) {
-  if (process.env.GASLIGHTER_MAX_NUDGES !== undefined) {
-    var fromEnv = parseMaxNudges(process.env.GASLIGHTER_MAX_NUDGES);
-    if (fromEnv !== undefined) return fromEnv;
-  }
-  cfg = cfg || loadConfig();
-  if (cfg.maxNudges !== undefined && cfg.maxNudges !== null) {
-    var fromCfg = parseMaxNudges(cfg.maxNudges);
-    if (fromCfg !== undefined) return fromCfg;
-  }
-  return MODE_DEFAULT_MAX[mode];
-}
-
-var CONFIDENCE_RE = /\b100%\s*(certain|confident|sure)\b/i;
-
-function confidenceDeclared(text) {
-  return CONFIDENCE_RE.test(text || '');
-}
+// ---------------------------------------------------------------------------
+// Claude transcript parsing (JSONL). This is Claude Code's on-disk format, so
+// it stays in the Claude adapter. It produces the abstract "turn" the core
+// consumes: { text, usedTools, editedFiles, complete, uuid }.
+// ---------------------------------------------------------------------------
 
 function sleepSync(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (e) {}
@@ -266,11 +76,10 @@ function sleepSync(ms) {
 // holds no assistant entry.
 // staleUuid, when given, is the uuid of the last assistant entry already
 // judged by a prior nudge cycle. Lite mode's additionalContext delivery
-// never inserts a real user-turn boundary (see waitForTurn's comment below),
-// so without this the backward walk keeps merging every turn since the last
-// real human message into one — a tool_use from turns ago (already judged
-// and nudged on) would permanently poison usedTools/editedFiles for every
-// later turn, even a plain-text one with no tool calls of its own.
+// never inserts a real user-turn boundary, so without this the backward walk
+// keeps merging every turn since the last real human message into one — a
+// tool_use from turns ago (already judged and nudged on) would permanently
+// poison usedTools/editedFiles for every later turn, even a plain-text one.
 function analyzeLastTurn(transcriptPath, staleUuid) {
   if (!transcriptPath) return null;
   var lines;
@@ -324,16 +133,8 @@ function analyzeLastTurn(transcriptPath, staleUuid) {
 // The harness flushes the turn's final text entry to transcript_path AFTER
 // the Stop hook starts (measured live: ~200ms). Poll until the last turn is
 // fully flushed; null on timeout — callers must fail quiet, never nudge blind.
-//
-// staleUuid guards against a race the naive "is the tail complete" check
-// missed: if the hook's first read lands before the harness appends the
-// just-finished turn, the tail is still the *previous* turn — which already
-// looks complete, since it too ended in a real text entry. That stale read
-// satisfies `turn.complete` immediately, so the hook judges old content
-// (observed live: a turn declaring "100% certain" got skipped entirely
-// because the poll returned the prior turn moments before the real one
-// landed). Passing the previously-processed turn's uuid forces the poll to
-// keep waiting until a turn with a *different* identity shows up complete.
+// staleUuid forces the poll to keep waiting until a turn with a *different*
+// identity shows up complete (the previous turn also looks complete).
 function waitForTurn(transcriptPath, deadlineMs, staleUuid) {
   var start = Date.now();
   while (true) {
@@ -350,9 +151,8 @@ function lastAssistantText(transcriptPath) {
   return turn ? turn.text : '';
 }
 
-// Smart mode's ground truth for the original ask when Phase 3's capture
-// didn't fire (e.g. session started before the capture hook existed): the
-// first real user message in the transcript.
+// Smart mode's ground truth for the original ask when capture didn't fire:
+// the first real user message in the transcript.
 function firstUserMessage(transcriptPath) {
   if (!transcriptPath) return '';
   var lines;
@@ -375,40 +175,24 @@ function firstUserMessage(transcriptPath) {
   return '';
 }
 
-function buildSmartCheckPrompt(originalRequest, lastTurnText) {
-  return "Original request:\n---\n" + originalRequest + "\n---\n\n" +
-    "Last turn's response:\n---\n" + lastTurnText + "\n---\n\n" +
-    "Did the response address every explicit requirement in the request? Answer as JSON only: " +
-    "{\"ok\": true} or {\"ok\": false, \"reason\": \"<the specific missing requirement(s)>\"}. " +
-    "Missing = explicitly asked and not done. Extra unrequested work is not a missing requirement.";
-}
-
-// Parses `claude --output-format json` stdout: the wrapper's `result` field
-// holds the model's reply text, which itself should be a JSON blob.
-function parseSmartOutput(stdout) {
-  var outer = JSON.parse(stdout);
-  var resultText = typeof outer.result === 'string' ? outer.result : JSON.stringify(outer.result);
-  var match = resultText.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('no JSON object found in result');
-  return JSON.parse(match[0]);
-}
-
 var SMART_TIMEOUT_MS = 20000;
 
 // Shells out to a cheap model asking whether the last turn actually missed a
-// requirement, instead of nudging unconditionally. Never throws: any failure
-// (missing binary, non-zero exit, timeout, malformed output) becomes
-// { status: 'failed' } so the caller can fall back to a plain nudge.
+// requirement. Never throws: any failure (missing binary, non-zero exit,
+// timeout, malformed output) becomes { status: 'failed' } so the caller falls
+// back to a plain nudge. Binary/model are configurable via engine resolvers.
 function runSmartCheck(payload, state, turn) {
+  var cfg = loadConfig();
   var originalRequest = (state.last_request && state.last_request.prompt) ||
     firstUserMessage(payload.transcript_path) || '(original request unavailable)';
-  var prompt = buildSmartCheckPrompt(originalRequest, (turn && turn.text) || '');
-  var binary = process.env.GASLIGHTER_SMART_CMD || 'claude';
+  var prompt = engine.buildSmartCheckPrompt(originalRequest, (turn && turn.text) || '');
+  var binary = engine.resolveSmartCmd(cfg);
+  var model = engine.resolveSmartModel(cfg);
   try {
     var stdout = execFileSync(binary,
-      ['-p', prompt, '--model', 'claude-haiku-4-5', '--output-format', 'json', '--max-turns', '1'],
+      ['-p', prompt, '--model', model, '--output-format', 'json', '--max-turns', '1'],
       { timeout: SMART_TIMEOUT_MS, encoding: 'utf8' });
-    var parsed = parseSmartOutput(stdout);
+    var parsed = engine.parseSmartOutput(stdout);
     if (parsed && parsed.ok === true) return { status: 'ok' };
     if (parsed && parsed.ok === false) return { status: 'gap', reason: parsed.reason || 'unspecified' };
     return { status: 'failed', error: 'unexpected response shape' };
@@ -417,55 +201,114 @@ function runSmartCheck(payload, state, turn) {
   }
 }
 
+// Maps a core exit reason to its debug-log event name (parity with prior logs).
+var EXIT_LOG_EVENT = {
+  flush_timeout: 'exit_flush_timeout',
+  confidence_declared: 'exit_confidence_declared',
+  no_tool_activity: 'exit_no_tool_activity',
+  no_edit_activity: 'exit_no_edit_activity',
+  smart_ok: 'smart_ok'
+};
 
-function getDataDir() {
-  var dataDir = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.claude', 'plugins', 'data', 'gaslighter');
-  try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
-  return dataDir;
+// ---------------------------------------------------------------------------
+// Adapter entry point.
+// ---------------------------------------------------------------------------
+if (require.main === module) {
+  var input = '';
+  process.stdin.on('data', function (chunk) { input += chunk; });
+  process.stdin.on('end', function () {
+    run(input).then(function () { process.exit(0); }, function (e) {
+      debugLog('hook_error', { error: e && e.message });
+      process.exit(0);
+    });
+  });
 }
 
-function getStatePath(sessionId) {
-  var sid = sessionId || process.env.CLAUDE_SESSION_ID || 'unknown';
-  return path.join(getDataDir(), 'state-' + sid + '.json');
-}
-
-function loadState(sessionId) {
+async function run(input) {
+  var payload;
   try {
-    return JSON.parse(fs.readFileSync(getStatePath(sessionId), 'utf8'));
+    payload = JSON.parse(input.replace(/^\ufeff/, ''));
   } catch (e) {
-    return { nudge_count: 0, turn_count: 0 };
+    debugLog('hook_error', { error: e.message });
+    return;
   }
-}
 
-function saveState(state, sessionId) {
-  var p = getStatePath(sessionId);
-  try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) {}
-  fs.writeFileSync(p, JSON.stringify(state));
-}
+  var sessionId = env.resolveSessionId(payload);
+  var cfg = loadConfig();
+  var mode = getMode(cfg);
+  debugLog('hook_invoked', { mode: mode, session: sessionId });
 
-function getConfigPath() {
-  return path.join(getDataDir(), 'config.json');
-}
+  if (mode === 'off') { debugLog('exit_mode_off'); return; }
 
-function loadConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(getConfigPath(), 'utf8'));
-  } catch (e) {
-    return {};
+  // Claude-specific: session is pausing for background work, not finishing.
+  var pendingBackgroundWork = (payload.background_tasks && payload.background_tasks.length > 0) ||
+    (payload.session_crons && payload.session_crons.length > 0);
+  if (pendingBackgroundWork) {
+    debugLog('exit_background_pending', {
+      session: sessionId,
+      tasks: (payload.background_tasks || []).length,
+      crons: (payload.session_crons || []).length
+    });
+    return;
   }
+
+  var state = loadState(sessionId);
+  var flushWaitMs = parseInt(process.env.GASLIGHTER_FLUSH_WAIT_MS, 10) || 5000;
+
+  var plan = await core.decide({
+    mode: mode,
+    maxNudges: getMaxNudges(mode, cfg),
+    state: state,
+    stopHookActive: payload.stop_hook_active === true,
+    nudgeOnReadOnly: getNudgeOnReadOnly(cfg),
+    getQuiet: function (m) { return engine.resolveQuiet(m, cfg); },
+    getTurn: function (staleUuid) { return waitForTurn(payload.transcript_path, flushWaitMs, staleUuid); },
+    runSmartCheck: function (st, turn) { return runSmartCheck(payload, st, turn); },
+    log: function (event, extra) { debugLog(event, Object.assign({ session: sessionId }, extra)); }
+  });
+
+  if (plan.action === 'exit') {
+    saveState(state, sessionId);
+    var ev = EXIT_LOG_EVENT[plan.reason];
+    if (ev) debugLog(ev, { nudge_count: state.nudge_count, session: sessionId });
+    return;
+  }
+
+  // action === 'deliver'
+  saveState(state, sessionId);
+  var d = plan.deliver;
+  debugLog('nudge_fired', d.smart
+    ? { nudge_count: state.nudge_count, mode: mode, session: sessionId, smart_status: plan.reason === 'smart_gap' ? 'gap' : 'failed' }
+    : { nudge_count: state.nudge_count, mode: mode, session: sessionId });
+
+  process.stdout.write(JSON.stringify(formatClaudeOutput(d)));
 }
 
-function saveConfig(cfg) {
-  var p = getConfigPath();
-  try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) {}
-  fs.writeFileSync(p, JSON.stringify(cfg));
+// Translates the core's abstract delivery into Claude's Stop-hook output shape.
+function formatClaudeOutput(d) {
+  if (d.blocking) {
+    var blockOut = { decision: 'block', reason: d.text };
+    if (d.systemMessage) blockOut.systemMessage = d.systemMessage;
+    return blockOut;
+  }
+  var softOut = { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: d.text } };
+  if (d.quiet) softOut.suppressOutput = true;
+  return softOut;
 }
 
-// Exported for testing
+// Exported for testing and for the other hook scripts (capture/cleanup/config).
 if (typeof module !== 'undefined') {
   module.exports = {
-    getMode, loadState, saveState, FIRST_NUDGE, SUBSEQUENT_NUDGE, confidenceDeclared, lastAssistantText, analyzeLastTurn, waitForTurn,
-    loadConfig, saveConfig, getConfigPath, getMaxNudges, MODE_DEFAULT_MAX, getQuiet, getNudgeOnReadOnly, getStatePath, getDataDir,
-    firstUserMessage, buildSmartCheckPrompt, parseSmartOutput, runSmartCheck
+    getMode: getMode, loadState: loadState, saveState: saveState,
+    FIRST_NUDGE: FIRST_NUDGE, SUBSEQUENT_NUDGE: SUBSEQUENT_NUDGE,
+    confidenceDeclared: confidenceDeclared, lastAssistantText: lastAssistantText,
+    analyzeLastTurn: analyzeLastTurn, waitForTurn: waitForTurn,
+    loadConfig: loadConfig, saveConfig: saveConfig, getConfigPath: getConfigPath,
+    getMaxNudges: getMaxNudges, MODE_DEFAULT_MAX: MODE_DEFAULT_MAX,
+    getQuiet: getQuiet, getNudgeOnReadOnly: getNudgeOnReadOnly,
+    getStatePath: getStatePath, getDataDir: getDataDir,
+    firstUserMessage: firstUserMessage, buildSmartCheckPrompt: buildSmartCheckPrompt,
+    parseSmartOutput: parseSmartOutput, runSmartCheck: runSmartCheck,
+    formatClaudeOutput: formatClaudeOutput
   };
 }
