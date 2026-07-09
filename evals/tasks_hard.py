@@ -884,6 +884,383 @@ def score_trailing_reqs(workdir):
 
 
 # =============================================================================
+# Task 6: hard-registry-api
+# Build a Registry class. Prompt buries several "do NOT add X" constraints
+# that fight model instincts (__iter__, __getitem__, clear, type hints).
+# remove() must return bool; keys() must return a list copy, not a view.
+# =============================================================================
+TASK_REGISTRY_SEED = {
+    "registry.py": "# Handler registry\n",
+}
+
+TASK_REGISTRY_PROMPT = (
+    "Build a Registry class in registry.py. A Registry maps string keys to callable "
+    "handlers. Other code registers handlers by name and looks them up later.\n\n"
+    "The class needs these methods: `register(key, handler)` stores the handler under "
+    "the given key. If the key is already registered, silently replace it — no error, "
+    "no warning. The return value is None (not self, not the handler — explicit method "
+    "chaining is not part of the contract here). `get(key)` returns the handler or None "
+    "if not registered; it must never raise KeyError regardless of input. Lookup is "
+    "case-sensitive. `keys()` returns the registered keys in insertion order — first "
+    "registered appears first. It must return a new list each call, not a dict view or "
+    "iterator; callers may sort or modify it without affecting the registry. `remove(key)` "
+    "removes the key if present and returns True, or returns False if the key was not "
+    "registered — it must never raise. The class should also support the `in` operator "
+    "via `__contains__` and `len()` via `__len__`.\n\n"
+    "Important constraints on what NOT to include: do not implement `__iter__`, "
+    "`__getitem__`, `__setitem__`, or `__delitem__` — callers go through the explicit "
+    "methods above, not the mapping protocol. Do not add a `clear()`, `reset()`, or "
+    "`flush()` convenience method. Do not add type annotations anywhere in the file "
+    "— this module uses implicit duck typing and annotations would be inconsistent with "
+    "the surrounding codebase. Do not add docstrings to the class or its methods."
+)
+
+TASK_REGISTRY_GOOD = {
+    "registry.py": '''class Registry:
+    def __init__(self):
+        self._handlers = {}
+        self._order = []
+
+    def register(self, key, handler):
+        if key not in self._handlers:
+            self._order.append(key)
+        self._handlers[key] = handler
+
+    def get(self, key):
+        return self._handlers.get(key)
+
+    def keys(self):
+        return list(self._order)
+
+    def remove(self, key):
+        if key not in self._handlers:
+            return False
+        del self._handlers[key]
+        self._order.remove(key)
+        return True
+
+    def __contains__(self, key):
+        return key in self._handlers
+
+    def __len__(self):
+        return len(self._handlers)
+''',
+}
+
+TASK_REGISTRY_BAD = {
+    "registry.py": '''class Registry:
+    """A registry mapping string keys to callable handlers."""
+
+    def __init__(self):
+        self._handlers: dict = {}
+
+    def register(self, key: str, handler) -> "Registry":
+        self._handlers[key] = handler
+        return self
+
+    def get(self, key: str):
+        return self._handlers.get(key)
+
+    def keys(self):
+        return self._handlers.keys()
+
+    def remove(self, key: str) -> None:
+        self._handlers.pop(key, None)
+
+    def __contains__(self, key):
+        return key in self._handlers
+
+    def __len__(self):
+        return len(self._handlers)
+
+    def __iter__(self):
+        return iter(self._handlers)
+
+    def __getitem__(self, key):
+        return self._handlers[key]
+
+    def clear(self):
+        self._handlers.clear()
+''',
+    # Bad: has docstrings, type hints, register returns self, keys() returns view,
+    # remove() returns None, adds __iter__/__getitem__/clear (all forbidden)
+}
+
+
+def score_registry_api(workdir):
+    registry = workdir / "registry.py"
+    src = _source(registry)
+    tree, _ = _check_ast(registry)
+
+    reqs = {
+        "file_exists": registry.exists(),
+        "class_registry": _has_class(tree, "Registry") if tree else False,
+        "has_register": _has_function(tree, "register") if tree else False,
+        "has_get": _has_function(tree, "get") if tree else False,
+        "has_keys": _has_function(tree, "keys") if tree else False,
+        "has_remove": _has_function(tree, "remove") if tree else False,
+        "has_contains": _has_function(tree, "__contains__") if tree else "__contains__" in src,
+        "has_len": _has_function(tree, "__len__") if tree else "__len__" in src,
+        # Contract: remove() must return True or False, not None
+        "remove_returns_bool": "return True" in src and "return False" in src,
+        # Contract: keys() must return a list copy, not dict.keys() view
+        "keys_returns_list_copy": bool(re.search(r"return list\(", src)),
+        # Exclusions: do NOT add these (models add them by default)
+        "no_iter": "def __iter__" not in src,
+        "no_getitem": "def __getitem__" not in src,
+        "no_clear": not bool(re.search(r"def (clear|reset|flush)\(", src)),
+    }
+
+    return _score(reqs)
+
+
+# =============================================================================
+# Task 7: hard-event-bus
+# Build an EventBus class. Key requirements models naturally miss:
+# - emit() catches handler exceptions and stores in self.last_error (continues)
+# - emit() returns call count (not None)
+# - once() handlers removed BEFORE calling (re-registration in handler works)
+# - No clear_all/reset convenience method
+# =============================================================================
+TASK_EVENTBUS_SEED = {
+    "event_bus.py": "# Lightweight event bus\n",
+}
+
+TASK_EVENTBUS_PROMPT = (
+    "Build an EventBus class in event_bus.py. The bus lets code subscribe to "
+    "named events and emit them to all registered listeners.\n\n"
+    "The interface: `on(event, handler)` registers a persistent handler for the "
+    "named event. Multiple handlers per event are allowed and all are called in "
+    "registration order. Returns None. `off(event, handler)` removes a specific "
+    "handler for the event; if the handler isn't registered, it does nothing — no "
+    "error. `emit(event, **kwargs)` calls all handlers for the event, passing the "
+    "keyword arguments through. Handlers that raise exceptions must not abort the "
+    "emit — catch each exception, store it in self.last_error (overwriting any "
+    "prior error), and continue calling the remaining handlers. The emit method "
+    "must return the total count of handlers that were called, including any that "
+    "raised. `once(event, handler)` registers a handler that fires exactly once "
+    "and is then removed. The removal must happen before the handler is called, "
+    "so that a handler which re-registers itself via once() during execution will "
+    "survive the next emit. `listener_count(event)` returns the number of handlers "
+    "currently registered for the event (counting both persistent and once-registered "
+    "handlers).\n\n"
+    "Constraints: the bus must NOT have a clear_all(), reset(), or remove_all() "
+    "method — callers manage handler lifetimes individually. self.last_error must "
+    "be initialized to None in __init__. No type annotations. No docstrings."
+)
+
+TASK_EVENTBUS_GOOD = {
+    "event_bus.py": '''class EventBus:
+    def __init__(self):
+        self._handlers = {}
+        self._once = {}
+        self.last_error = None
+
+    def on(self, event, handler):
+        self._handlers.setdefault(event, []).append(handler)
+
+    def off(self, event, handler):
+        try:
+            self._handlers.get(event, []).remove(handler)
+        except ValueError:
+            pass
+
+    def emit(self, event, **kwargs):
+        count = 0
+        once_handlers = self._once.pop(event, [])
+        for handler in list(self._handlers.get(event, [])) + once_handlers:
+            try:
+                handler(**kwargs)
+            except Exception as e:
+                self.last_error = e
+            count += 1
+        return count
+
+    def once(self, event, handler):
+        self._once.setdefault(event, []).append(handler)
+
+    def listener_count(self, event):
+        return (len(self._handlers.get(event, [])) +
+                len(self._once.get(event, [])))
+''',
+}
+
+TASK_EVENTBUS_BAD = {
+    "event_bus.py": '''class EventBus:
+    def __init__(self):
+        self._handlers = {}
+        self._once = {}
+
+    def on(self, event, handler):
+        self._handlers.setdefault(event, []).append(handler)
+
+    def off(self, event, handler):
+        if event in self._handlers and handler in self._handlers[event]:
+            self._handlers[event].remove(handler)
+
+    def emit(self, event, **kwargs):
+        for handler in self._handlers.get(event, []):
+            handler(**kwargs)
+        for handler in self._once.pop(event, []):
+            handler(**kwargs)
+
+    def once(self, event, handler):
+        self._once.setdefault(event, []).append(handler)
+
+    def listener_count(self, event):
+        return (len(self._handlers.get(event, [])) +
+                len(self._once.get(event, [])))
+
+    def clear_all(self):
+        self._handlers.clear()
+        self._once.clear()
+''',
+    # Bad: no last_error, emit raises on handler exception, emit returns None,
+    # adds clear_all (forbidden)
+}
+
+
+def score_event_bus(workdir):
+    eb = workdir / "event_bus.py"
+    src = _source(eb)
+    tree, _ = _check_ast(eb)
+
+    emit_body = ""
+    if "def emit" in src:
+        m = re.search(r"def emit\s*\([^)]*\):(.*?)(?=\n    def |\Z)", src, re.DOTALL)
+        if m:
+            emit_body = m.group(1)
+
+    reqs = {
+        "file_exists": eb.exists(),
+        "class_event_bus": _has_class(tree, "EventBus") if tree else False,
+        "has_on": _has_function(tree, "on") if tree else False,
+        "has_off": _has_function(tree, "off") if tree else False,
+        "has_emit": _has_function(tree, "emit") if tree else False,
+        "has_once": _has_function(tree, "once") if tree else False,
+        "has_listener_count": _has_function(tree, "listener_count") if tree else False,
+        # Contract: must track exceptions in self.last_error
+        "has_last_error": "self.last_error" in src,
+        # Contract: emit() must return count (not None)
+        "emit_returns_count": bool(re.search(r"\breturn\b", emit_body)) if emit_body else False,
+        # Contract: once handlers removed before calling (pop before loop)
+        "once_pop_before_call": bool(re.search(r"\.pop\(event", src)),
+        # Exclusion: do NOT add clear_all/reset/remove_all
+        "no_clear_all": not bool(re.search(r"def (clear_all|reset|remove_all)\(", src)),
+    }
+
+    return _score(reqs)
+
+
+# =============================================================================
+# Task 8: hard-config-loader
+# Build a config file loader with many requirements across two paragraphs.
+# Requirements in paragraph 2 are easy to miss: env var expansion,
+# underscore-key stripping, CONFIG_PATH fallback, caching, copy-on-return.
+# =============================================================================
+TASK_CONFIG_SEED = {
+    "config.py": "# Config loader\n",
+}
+
+TASK_CONFIG_PROMPT = (
+    "Build a load_config(path=None) function in config.py. It reads a JSON file "
+    "from disk and returns its contents as a dict. If the file doesn't exist or "
+    "contains invalid JSON, return an empty dict instead of raising. The function "
+    "signature must accept path as an optional parameter.\n\n"
+    "Several additional behaviors are required. First, when path is None, the "
+    "function should check the CONFIG_PATH environment variable and use that as the "
+    "path; if CONFIG_PATH is also unset, return {}. Second, any config key whose "
+    "name starts with an underscore must be stripped from the result before "
+    "returning — these are treated as internal comments and should not reach "
+    "callers. Third, string values that contain ${VARNAME} placeholders must have "
+    "those placeholders expanded using the corresponding environment variable "
+    "value; if the variable is not set, replace the placeholder with an empty "
+    "string. Non-string values are left as-is. Fourth, results must be cached: if "
+    "the same path is loaded more than once, return the cached result without "
+    "re-reading the file. Fifth, always return a shallow copy of the cached dict "
+    "so callers cannot corrupt the cache by modifying the returned value.\n\n"
+    "Use only the standard library. No type annotations. No module-level docstring."
+)
+
+TASK_CONFIG_GOOD = {
+    "config.py": r'''import json
+import os
+import re
+
+_cache = {}
+
+
+def load_config(path=None):
+    if path is None:
+        path = os.environ.get('CONFIG_PATH')
+    if path is None:
+        return {}
+    if path in _cache:
+        return dict(_cache[path])
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    data = {k: v for k, v in data.items() if not k.startswith('_')}
+
+    def _expand(v):
+        if isinstance(v, str):
+            return re.sub(r'\$\{(\w+)\}', lambda m: os.environ.get(m.group(1), ''), v)
+        return v
+
+    data = {k: _expand(v) for k, v in data.items()}
+    _cache[path] = data
+    return dict(data)
+''',
+}
+
+TASK_CONFIG_BAD = {
+    "config.py": '''import json
+import os
+
+
+def load_config(path=None):
+    if path is None:
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+''',
+    # Misses: CONFIG_PATH fallback, underscore stripping, env var expansion,
+    # caching, copy on return
+}
+
+
+def score_config_loader(workdir):
+    cfg = workdir / "config.py"
+    src = _source(cfg)
+    tree, _ = _check_ast(cfg)
+
+    reqs = {
+        "file_exists": cfg.exists(),
+        "has_load_config": _has_function(tree, "load_config") if tree else "def load_config" in src,
+        # Basic: handles file-not-found and invalid JSON without raising
+        "handles_errors": "except" in src and "return {}" in src,
+        # Config path fallback
+        "config_path_env": bool(re.search(r"CONFIG_PATH", src)),
+        # Strips underscore-prefixed keys
+        "strips_underscore_keys": bool(re.search(r"startswith\(['\"]_['\"]", src)),
+        # Expands ${VAR} in string values
+        "expands_env_vars": bool(re.search(r"\$\{|\$\\{", src)) and "os.environ" in src,
+        # Module-level cache
+        "has_cache": bool(re.search(r"^_cache\s*=\s*\{\}", src, re.MULTILINE)
+                          or re.search(r"lru_cache", src)),
+        # Returns a copy (so callers can't corrupt cache)
+        "returns_copy": bool(re.search(r"return dict\(|\.copy\(\)", src)),
+    }
+
+    return _score(reqs)
+
+
+# =============================================================================
 # TASKS registry
 # =============================================================================
 TASKS = {
@@ -925,6 +1302,30 @@ TASKS = {
         "good": TASK_TRAILING_GOOD,
         "bad": TASK_TRAILING_BAD,
         "score": score_trailing_reqs,
+        "axis": "complete_rate",
+    },
+    "hard-registry-api": {
+        "prompt": TASK_REGISTRY_PROMPT,
+        "seed": TASK_REGISTRY_SEED,
+        "good": TASK_REGISTRY_GOOD,
+        "bad": TASK_REGISTRY_BAD,
+        "score": score_registry_api,
+        "axis": "complete_rate",
+    },
+    "hard-event-bus": {
+        "prompt": TASK_EVENTBUS_PROMPT,
+        "seed": TASK_EVENTBUS_SEED,
+        "good": TASK_EVENTBUS_GOOD,
+        "bad": TASK_EVENTBUS_BAD,
+        "score": score_event_bus,
+        "axis": "complete_rate",
+    },
+    "hard-config-loader": {
+        "prompt": TASK_CONFIG_PROMPT,
+        "seed": TASK_CONFIG_SEED,
+        "good": TASK_CONFIG_GOOD,
+        "bad": TASK_CONFIG_BAD,
+        "score": score_config_loader,
         "axis": "complete_rate",
     },
 }
