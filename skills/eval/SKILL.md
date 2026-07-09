@@ -44,16 +44,18 @@ Runs the gaslighter evaluation suite using `evals/run.py`:
 - `sonnet` → `claude-sonnet-4-6`
 - `opus` → `claude-opus-4-8`
 
-**Output location**: `evals/runs/{timestamp}/`
+**Output location**: `evals/runs/{timestamp}/` (gitignored)
 - `results.json` — All cell results with automated scores
 - `summary.json` — Aggregated results by arm/model
-- Workspace dirs: `{task}__{arm}__{model}__{run}/`
+- `workspaces/{task}__{arm}__{model}__{run}/` — kept model outputs, enable `--rescore`
 
-**Default config** (from `evals/config.json`):
-- Workers: 4
+**Default config** (from `evals/config.json`) — lean by default; widen with flags:
+- Workers: 8
 - Timeout: 300s per cell
-- Runs: 3
-- Models: `["haiku", "sonnet"]`
+- Runs: 2
+- Models: `["haiku"]`
+- Arms: `["baseline", "gaslighter-lite", "gaslighter-full"]`
+- Default matrix: 8 tasks × 1 model × 3 arms × 2 runs = **48 cells**. Use `--all --arms ... --models haiku,sonnet` to widen.
 
 ## Implementation Instructions
 
