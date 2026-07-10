@@ -53,28 +53,31 @@ CHART_FEATURED_ARM = "gaslighter-full"
 # Each spec drives one metric's light+dark SVG pair. `field` reads a mean from
 # the already-aggregated headline row (aggregate() computes all of these);
 # `value` rescales it into the chart's plotted unit.
+# `domain` fixes the x-axis so bar length is comparable and a small value reads
+# as small: 100 for the three 0-100 metrics, None (auto-scale) for turns, which
+# is an unbounded count. `value` maps the stored mean into the plotted unit.
 CHART_SPECS = [
     {"key": "benchmark", "title": "Missed requirements per 100 tasks",
-     "subtitle": "headless Claude Code sessions, deterministic scoring &#183; lower is better",
-     "field": "correct", "value": lambda v: (1 - v) * 100},
+     "subtitle": "share of tasks with a missed requirement (deterministic checks) &#183; axis 0&#8211;100, lower is better",
+     "field": "correct", "value": lambda v: (1 - v) * 100, "domain": 100},
     {"key": "benchmark-completeness", "title": "Missed requirements (judged) per 100 tasks",
-     "subtitle": "LLM-judged completeness (0-3 scale) rescaled to missed points per 100 tasks &#183; lower is better",
-     "field": "judge_completeness", "value": lambda v: (3 - v) / 3 * 100},
+     "subtitle": "judged completeness gap, from 0&#8211;3 scores &#183; axis 0&#8211;100 (3&#8594;100), lower is better",
+     "field": "judge_completeness", "value": lambda v: (3 - v) / 3 * 100, "domain": 100},
     {"key": "benchmark-turns", "title": "Turns per task (mean)",
      "subtitle": "mean turns per arm &#183; cost/overhead, not a quality signal",
-     "field": "turns", "value": lambda v: v},
+     "field": "turns", "value": lambda v: v, "domain": None},
     {"key": "benchmark-overcorrection", "title": "Overcorrection per 100 tasks",
-     "subtitle": "LLM-judged overcorrection (0-3 scale) rescaled per 100 tasks &#183; lower is better",
-     "field": "judge_overcorrection", "value": lambda v: (v / 3) * 100},
+     "subtitle": "judged overcorrection, from 0&#8211;3 scores &#183; axis 0&#8211;100 (3&#8594;100), lower is better",
+     "field": "judge_overcorrection", "value": lambda v: (v / 3) * 100, "domain": 100},
 ]
 
 
-def _git_sha():
-    try:
-        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
-                               text=True, check=True).stdout.strip()
-    except Exception:
-        return None
+_SEMVER_RE = re.compile(r"\d+\.\d+\.\d+")
+LATEST = "latest"          # commits after the newest release tag → HEAD (in-development)
+
+
+def _semver_tuple(tag):
+    return tuple(int(p) for p in tag.lstrip("v").split("."))
 
 
 def _version_tags_containing(sha):
@@ -86,27 +89,62 @@ def _version_tags_containing(sha):
     return [t.strip() for t in out.splitlines() if t.strip()]
 
 
-def _semver_tuple(tag):
-    return tuple(int(p) for p in tag.lstrip("v").split("."))
+@functools.lru_cache(maxsize=None)
+def _all_release_tags():
+    try:
+        out = subprocess.run(["git", "tag"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    except Exception:
+        return ()
+    return tuple(sorted((t.strip() for t in out.splitlines() if t.strip()), key=_semver_tuple))
+
+
+def latest_release_tag():
+    tags = _all_release_tags()
+    return tags[-1] if tags else None
 
 
 @functools.lru_cache(maxsize=None)
-def version_bucket(sha):
-    """Dynamically resolved at render time from current git tags — a sha never
-    changes, but its bucket moves from 'unreleased' to 'vX.Y.Z' the next time
-    this runs after that tag exists locally."""
-    if not sha or sha == "unknown":
+def version_bucket(ref):
+    """Map a recorded plugin ref to a tag-range cohort. A commit belongs to the
+    earliest release tag that contains it — i.e. the version whose range
+    (prev_tag, this_tag] it falls in. Commits after the newest tag belong to no
+    release yet → 'latest' (what the README features). Resolved dynamically from
+    current git tags, so a commit's bucket moves from 'latest' to 'vX.Y.Z' once
+    that release is tagged. A semver string (recorded by non-git cache installs)
+    is taken as that released version directly."""
+    if not ref or ref == "unknown":
         return "pre-instrumentation"
-    tags = _version_tags_containing(sha)
+    if _SEMVER_RE.fullmatch(ref):
+        tags = _all_release_tags()
+        exact = next((t for t in tags if _semver_tuple(t) == _semver_tuple(ref)), None)
+        return exact or ref
+    tags = _version_tags_containing(ref)
     if not tags:
-        return "unreleased"
+        return LATEST
     return min(tags, key=_semver_tuple)
+
+
+def current_scope(rows):
+    """The cohort the README features: 'latest' (post-newest-tag commits) if it
+    has runs, else the newest released version present in the data."""
+    present = {r["hook_version"] for r in rows}
+    if LATEST in present:
+        return LATEST
+    versioned = [v for v in present if v not in ("pre-instrumentation", LATEST)]
+    return max(versioned, key=_semver_tuple) if versioned else LATEST
+
+
+def scope_label(bucket):
+    if bucket == LATEST:
+        tag = latest_release_tag()
+        return f"latest (unreleased, since {tag})" if tag else "latest (unreleased)"
+    return bucket
 
 
 def _version_sort_key(v):
     if v == "pre-instrumentation":
         return (0, ())
-    if v == "unreleased":
+    if v == LATEST:
         return (2, ())
     return (1, _semver_tuple(v))
 
@@ -286,16 +324,26 @@ def compute_run_meta(pooled_rows):
     return meta
 
 
-def _chart_svg(bars, theme, title, subtitle):
-    """Horizontal bar chart. bars = [(arm, value)] sorted desc."""
+def _chart_svg(bars, theme, title, subtitle, caveat, domain=None):
+    """Horizontal bar chart. bars = [(arm, value)] sorted desc.
+
+    domain: fixed x-axis max (e.g. 100) → all bars share one scale and a labeled
+    0..domain axis is drawn, so a small value renders as a short bar instead of
+    filling the row. None → auto-scale to the data (for unbounded counts)."""
     font = 'system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif'
-    left, right, top, row_h, bar_h, bottom = 170, 60, 58, 34, 18, 14
+    left, right, top, row_h, bar_h, bottom = 170, 60, 74, 34, 18, 34
     width = 860
     height = top + row_h * len(bars) + bottom
-    xmax = max(v for _, v in bars) * 1.15 or 1
+    fixed = domain is not None
+    xmax = domain if fixed else (max(v for _, v in bars) * 1.15 or 1)
     plot_w = width - left - right
-    aria = (f"{title} by arm; {bars[-1][0]} lowest at {bars[-1][1]:.1f}, "
-            f"{bars[0][0]} highest at {bars[0][1]:.1f}.")
+    vals = [v for _, v in bars]
+    tied = max(vals) - min(vals) < 0.05
+    if tied:
+        aria = f"{title} by arm; all arms tied at {vals[0]:.1f}."
+    else:
+        aria = (f"{title} by arm; {bars[-1][0]} lowest at {bars[-1][1]:.1f}, "
+                f"{bars[0][0]} highest at {bars[0][1]:.1f}.")
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" '
@@ -304,28 +352,55 @@ def _chart_svg(bars, theme, title, subtitle):
         f'fill="{theme["ink"]}">{title}</text>',
         f'<text x="{left}" y="41" font-family="{font}" font-size="12.5" '
         f'fill="{theme["ink2"]}">{subtitle}</text>',
+        f'<text x="{left}" y="59" font-family="{font}" font-size="11.5" '
+        f'fill="{theme["ink2"]}">{caveat}</text>',
     ]
     for i, (arm, v) in enumerate(bars):
         y = top + i * row_h + (row_h - bar_h) / 2
-        w = max(v / xmax * plot_w, 6)
+        w = max(v / xmax * plot_w, 0)
         color = theme["accent"] if arm == CHART_FEATURED_ARM else theme["neutral"]
         weight = ' font-weight="600"' if arm == CHART_FEATURED_ARM else ""
-        r = 4
-        parts += [
+        r = min(4, w / 2)
+        parts.append(
             f'<text x="{left - 12}" y="{y + bar_h / 2 + 4.5}" text-anchor="end" '
-            f'font-family="{font}" font-size="13"{weight} fill="{theme["ink2"] if arm != CHART_FEATURED_ARM else theme["ink"]}">{arm}</text>',
-            f'<path d="M{left},{y} H{left + w - r} Q{left + w},{y} {left + w},{y + r} '
-            f'V{y + bar_h - r} Q{left + w},{y + bar_h} {left + w - r},{y + bar_h} H{left} Z" fill="{color}"/>',
+            f'font-family="{font}" font-size="13"{weight} fill="{theme["ink2"] if arm != CHART_FEATURED_ARM else theme["ink"]}">{arm}</text>')
+        if w > 0.5:
+            parts.append(
+                f'<path d="M{left},{y} H{left + w - r} Q{left + w},{y} {left + w},{y + r} '
+                f'V{y + bar_h - r} Q{left + w},{y + bar_h} {left + w - r},{y + bar_h} H{left} Z" fill="{color}"/>')
+        parts.append(
             f'<text x="{left + w + 8}" y="{y + bar_h / 2 + 4.5}" font-family="{font}" '
-            f'font-size="13"{weight} fill="{theme["ink"]}">{v:.1f}</text>',
-        ]
-    parts.append(f'<line x1="{left}" y1="{top - 4}" x2="{left}" y2="{height - bottom}" '
+            f'font-size="13"{weight} fill="{theme["ink"]}">{v:.1f}</text>')
+    axis_bottom = height - bottom
+    parts.append(f'<line x1="{left}" y1="{top - 4}" x2="{left}" y2="{axis_bottom}" '
                  f'stroke="{theme["axis"]}" stroke-width="1"/>')
+    if fixed:
+        for t in (domain / 2, domain):
+            x = left + t / xmax * plot_w
+            parts.append(f'<line x1="{x}" y1="{top - 4}" x2="{x}" y2="{axis_bottom}" '
+                         f'stroke="{theme["axis"]}" stroke-width="1" stroke-dasharray="2 3"/>')
+            parts.append(f'<text x="{x}" y="{axis_bottom + 15}" text-anchor="middle" '
+                         f'font-family="{font}" font-size="11" fill="{theme["ink2"]}">{t:.0f}</text>')
+        parts.append(f'<text x="{left}" y="{axis_bottom + 15}" text-anchor="middle" '
+                     f'font-family="{font}" font-size="11" fill="{theme["ink2"]}">0</text>')
     parts.append("</svg>")
     return "\n".join(parts) + "\n"
 
 
-def render_chart_svgs(headline_agg):
+def _chart_caveat(current_rows, version):
+    arm_counts = defaultdict(int)
+    for r in current_rows:
+        arm_counts[r["arm"]] += 1
+    n_per_arm = max(arm_counts.values()) if arm_counts else 0
+    n_tasks = len(set(r["task"] for r in current_rows))
+    n_models = len(set(r["model"] for r in current_rows))
+    n_runs = len(set(r["run_stamp"] for r in current_rows))
+    return (f"gaslighter {version} &#183; n={n_per_arm}/arm &#183; {n_tasks} tasks &#215; "
+            f"{n_models} model{'s' if n_models != 1 else ''} &#215; {n_runs} run"
+            f"{'s' if n_runs != 1 else ''} &#8212; directional, not statistically significant")
+
+
+def render_chart_svgs(headline_agg, caveat):
     ASSETS.mkdir(exist_ok=True)
     written = []
     for spec in CHART_SPECS:
@@ -336,8 +411,77 @@ def render_chart_svgs(headline_agg):
             raise RenderError(f"no {spec['field']} data to chart for {spec['key']}")
         for suffix, theme in ((".svg", CHART_THEMES["light"]), ("-dark.svg", CHART_THEMES["dark"])):
             path = ASSETS / f"{spec['key']}{suffix}"
-            path.write_text(_chart_svg(bars, theme, spec["title"], spec["subtitle"]), encoding="utf-8")
+            path.write_text(_chart_svg(bars, theme, spec["title"], spec["subtitle"], caveat,
+                                       domain=spec.get("domain")), encoding="utf-8")
             written.append(path)
+    return written
+
+
+def _short_version(bucket):
+    return {"pre-instrumentation": "pre-instr.", LATEST: LATEST}.get(bucket, bucket)
+
+
+def _version_comparison_svg(agg, versions, theme):
+    """Small multiples: one panel per aspect, one bar per version cohort, plotting
+    the featured arm. Each panel keeps its own scale (mixed units), so bars are
+    comparable within a panel, not across panels."""
+    font = 'system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif'
+    left, top, bar_h, row_h, panel_gap, panel_title_h, bottom = 170, 58, 15, 24, 18, 22, 14
+    width, plot_w = 860, 860 - 170 - 60
+    body, y = [], top
+    for spec in CHART_SPECS:
+        body.append(f'<text x="{left}" y="{y + 14}" font-family="{font}" font-size="13" '
+                    f'font-weight="600" fill="{theme["ink"]}">{spec["title"]}</text>')
+        y += panel_title_h
+        vals = [(v, spec["value"](agg[v][spec["field"]])) for v in versions
+                if agg[v].get(spec["field"]) is not None]
+        domain = spec.get("domain")
+        xmax = domain if domain is not None else (max((x for _, x in vals), default=1) * 1.15 or 1)
+        for ver, val in vals:
+            by = y + (row_h - bar_h) / 2
+            w = max(val / xmax * plot_w, 0)
+            color = theme["accent"] if ver == LATEST else theme["neutral"]
+            weight = ' font-weight="600"' if ver == LATEST else ""
+            r = min(4, w / 2)
+            body.append(f'<text x="{left - 12}" y="{by + bar_h / 2 + 4}" text-anchor="end" '
+                        f'font-family="{font}" font-size="12"{weight} '
+                        f'fill="{theme["ink"] if ver == LATEST else theme["ink2"]}">{_short_version(ver)}</text>')
+            if w > 0.5:
+                body.append(f'<path d="M{left},{by} H{left + w - r} Q{left + w},{by} {left + w},{by + r} '
+                            f'V{by + bar_h - r} Q{left + w},{by + bar_h} {left + w - r},{by + bar_h} H{left} Z" fill="{color}"/>')
+            body.append(f'<text x="{left + w + 8}" y="{by + bar_h / 2 + 4}" font-family="{font}" '
+                        f'font-size="12"{weight} fill="{theme["ink"]}">{val:.1f}</text>')
+            y += row_h
+        y += panel_gap
+    height = y + bottom
+    aria = (f"{CHART_FEATURED_ARM} across {len(versions)} version cohorts on "
+            f"{len(CHART_SPECS)} aspects; latest cohort highlighted.")
+    header = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" role="img" aria-label="{aria}">',
+        f'<text x="{left}" y="22" font-family="{font}" font-size="15" font-weight="600" '
+        f'fill="{theme["ink"]}">{CHART_FEATURED_ARM} across versions</text>',
+        f'<text x="{left}" y="41" font-family="{font}" font-size="12.5" fill="{theme["ink2"]}">'
+        f'cohorts by release range &#183; latest = commits since {latest_release_tag() or "start"} &#183; '
+        f'lower is better (turns is cost, not quality)</text>',
+    ]
+    return "\n".join(header + body + ["</svg>"]) + "\n"
+
+
+def render_version_comparison_svgs(pooled_rows):
+    """One SVG (light+dark) comparing the featured arm across every version cohort
+    that has data — pre-instrumentation, each released version, and latest."""
+    ASSETS.mkdir(exist_ok=True)
+    feat = [r for r in pooled_rows if r["arm"] == CHART_FEATURED_ARM]
+    agg = {r["hook_version"]: r for r in aggregate(feat, ["hook_version"])}
+    versions = sorted(agg, key=_version_sort_key)
+    if not versions:
+        raise RenderError(f"no {CHART_FEATURED_ARM} data for version comparison")
+    written = []
+    for suffix, theme in ((".svg", CHART_THEMES["light"]), ("-dark.svg", CHART_THEMES["dark"])):
+        path = ASSETS / f"benchmark-versions{suffix}"
+        path.write_text(_version_comparison_svg(agg, versions, theme), encoding="utf-8")
+        written.append(path)
     return written
 
 
@@ -579,10 +723,10 @@ def render(run_dir, dry_run=False):
     pooled_rows = pooled_prior + new_rows
     for r in pooled_rows:
         r["hook_version"] = version_bucket(r["hook_sha"])
-    current_version = version_bucket(_git_sha())
+    current_version = current_scope(pooled_rows)
     current_rows = [r for r in pooled_rows if r["hook_version"] == current_version]
     if not current_rows:
-        sys.exit(f"no cells found for current version {current_version!r} — "
+        sys.exit(f"no cells found for current scope {scope_label(current_version)!r} — "
                   f"run an eval at this commit first")
 
     print_delta(pooled_prior, pooled_rows)
@@ -600,7 +744,7 @@ def render(run_dir, dry_run=False):
     headline_agg = render_headline_table(current_rows)
     n_tasks = len(set(r["task"] for r in current_rows))
     n_models = len(set(r["model"] for r in current_rows))
-    headline_desc = (f"Scoped to {current_version} (current), n={headline_agg[0]['n']} per arm — "
+    headline_desc = (f"Scoped to {scope_label(current_version)}, n={headline_agg[0]['n']} per arm — "
                       f"{n_tasks} tasks, {n_models} models — see Version history below for trend "
                       f"across releases.")
     headline_body = headline_desc + "\n\n" + _render_table(
@@ -653,7 +797,8 @@ def render(run_dir, dry_run=False):
     FINDINGS.write_text(findings_text, encoding="utf-8")
     README.write_text(readme_text, encoding="utf-8")
     EVALS_README.write_text(evals_readme_text, encoding="utf-8")
-    charts = render_chart_svgs(headline_agg)
+    charts = render_chart_svgs(headline_agg, _chart_caveat(current_rows, scope_label(current_version)))
+    charts += render_version_comparison_svgs(pooled_rows)
     print(f"\nwrote {FINDINGS}, {README}, {EVALS_README} ({len(new_rows)} new appendix rows)")
     print("wrote " + ", ".join(str(c) for c in charts))
 
@@ -673,13 +818,16 @@ def main():
         rows = parse_appendix(FINDINGS.read_text(encoding="utf-8"))
         for r in rows:
             r["hook_version"] = version_bucket(r["hook_sha"])
-        current_version = version_bucket(_git_sha())
+        current_version = current_scope(rows)
         current_rows = [r for r in rows if r["hook_version"] == current_version]
+        label = scope_label(current_version)
         if not current_rows:
-            print(f"no cells for current version {current_version!r} — "
+            print(f"no cells for current scope {label!r} — "
                   f"using full pooled appendix instead", file=sys.stderr)
-            current_rows = rows
-        charts = render_chart_svgs(render_headline_table(current_rows))
+            current_rows, label = rows, "all versions pooled"
+        charts = render_chart_svgs(render_headline_table(current_rows),
+                                   _chart_caveat(current_rows, label))
+        charts += render_version_comparison_svgs(rows)
         print("wrote " + ", ".join(str(c) for c in charts))
         return
 

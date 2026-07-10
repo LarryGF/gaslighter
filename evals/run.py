@@ -65,10 +65,25 @@ NO_RUN = (
 CODE_EXT = {".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".go", ".rs", ".java", ".rb", ".sh"}
 
 
-def _git_sha():
+def _git_sha(cwd=ROOT):
     try:
-        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(cwd), capture_output=True,
                                text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
+def _plugin_ref():
+    """Identity of the plugin actually under test (not the eval harness). Prefer
+    the plugin dir's git sha; fall back to its declared plugin.json version when
+    it's a non-git cache install. render_findings maps this to a plugin version.
+    lkb: sha is only a provenance key here — scoping is by plugin version."""
+    d = Path(_plugin_dir())
+    sha = _git_sha(d)
+    if sha:
+        return sha
+    try:
+        return json.loads((d / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version")
     except Exception:
         return None
 
@@ -332,7 +347,7 @@ def run_cell(task_id, arm, model, workdir, timeout=CELL_TIMEOUT):
 
     # Sidecar file (not _claude.json, which is the CLI's own output) so hook_sha
     # survives --rescore, which rebuilds results.json from workspace dirs alone.
-    (workdir / "_hook_sha.txt").write_text(_git_sha() or "unknown", encoding="utf-8")
+    (workdir / "_hook_sha.txt").write_text(_plugin_ref() or "unknown", encoding="utf-8")
 
     # lkb: flush OS write buffers before scoring — 4 parallel workers + heavy I/O
     # caused stale reads where scorer saw seed files instead of CLI-written output
