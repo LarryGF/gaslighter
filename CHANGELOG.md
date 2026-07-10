@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.6.0](https://github.com/LarryGF/gaslighter/compare/v1.5.0...v1.6.0) (2026-07-10)
+
+
+### Features
+
+* **config:** add smartModel and smartCmd config validation ([385806f](https://github.com/LarryGF/gaslighter/commit/385806f82fc3d302047b9cfb4c5aa92badd2e350))
+* **evals:** add cross-version comparison chart ([469084c](https://github.com/LarryGF/gaslighter/commit/469084c65639eb7aaa35fc123e622abc0147bbc7))
+* **evals:** add plugin version tracking and release-cohort bucketing ([01f1fed](https://github.com/LarryGF/gaslighter/commit/01f1fed5fc81ccce5e6efabcdfcbbd1b336b3a88))
+* **evals:** add three new hard-tier eval tasks ([383e4ad](https://github.com/LarryGF/gaslighter/commit/383e4adafabf1dab9844f0f2656cb6e030c9b4e0))
+* **evals:** add version-scoped metrics and split benchmark charts ([5fc47a6](https://github.com/LarryGF/gaslighter/commit/5fc47a6f6a139c06e90e458edda9c8fc1cdfd4d6))
+
+
+### Bug Fixes
+
+* **evals:** check run_dir/workspaces first in judge.py collect() ([be0e40a](https://github.com/LarryGF/gaslighter/commit/be0e40ae600a675de200fe2c84ac2691c2ba626e))
+* **evals:** replace broken --bare flag and add delta columns ([6306fd7](https://github.com/LarryGF/gaslighter/commit/6306fd7bd11d0a4de2871db6e31eff28d1e72e4c))
+* **evals:** scope --chart flag to current version like render() path ([b6a1524](https://github.com/LarryGF/gaslighter/commit/b6a15246454262d2f973a975990092174fdb0a60))
+* **evals:** scope intro to current version, fix chart subtitles ([81a8e95](https://github.com/LarryGF/gaslighter/commit/81a8e95f4402a7cb813977f2f3d7f7ba303a49ce))
+* **evals:** use hermetic data dir for selftest isolation ([c7653d7](https://github.com/LarryGF/gaslighter/commit/c7653d7bb2da735951b24197d992b1cf7bbe3d6f))
+* **gaslighter:** pass CLAUDE_PLUGIN_DATA to config CLI in SKILL.md ([c2df3a7](https://github.com/LarryGF/gaslighter/commit/c2df3a7d457c8ba7b5a27a5b799b6b503d193341))
+
+
+### Documentation
+
+* **evals:** update benchmark results from 20260709-151040 run ([38d601e](https://github.com/LarryGF/gaslighter/commit/38d601eaa5e4e4e6cda469329771d719c7141a17))
+* **eval:** update skill docs with new defaults and output location ([b14fdad](https://github.com/LarryGF/gaslighter/commit/b14fdad1e714fe9ce84a9241f15ab58b108e84d3))
+* **project:** document harness-agnostic architecture ([50287c6](https://github.com/LarryGF/gaslighter/commit/50287c6cfb7e3d9e400106ae54ffd36f3885fab2))
+* **readme:** add OpenCode section and smart config docs ([f2ed712](https://github.com/LarryGF/gaslighter/commit/f2ed71237de6b387f11c16f86b5362b296cf2db1))
+
+
+### Miscellaneous
+
+* **evals:** add sonnet to default eval models ([97dccbc](https://github.com/LarryGF/gaslighter/commit/97dccbcdf36fb3fde7346228ca02575609c46a0c))
+* **evals:** reduce default matrix to lean benchmark ([fae8299](https://github.com/LarryGF/gaslighter/commit/fae829979c2f02b307690f76d15c4d847caa23b0))
+* **evals:** update benchmark results with 20260710-143019 run data ([8aca0b2](https://github.com/LarryGF/gaslighter/commit/8aca0b2729db664b4862a9c4a01ec02cd6d826e1))
+
 ## [1.5.0](https://github.com/LarryGF/gaslighter/compare/v1.4.0...v1.5.0) (2026-07-07)
 
 
