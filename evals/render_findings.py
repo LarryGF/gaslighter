@@ -671,7 +671,15 @@ def main():
 
     if args.chart:
         rows = parse_appendix(FINDINGS.read_text(encoding="utf-8"))
-        charts = render_chart_svgs(render_headline_table(rows))
+        for r in rows:
+            r["hook_version"] = version_bucket(r["hook_sha"])
+        current_version = version_bucket(_git_sha())
+        current_rows = [r for r in rows if r["hook_version"] == current_version]
+        if not current_rows:
+            print(f"no cells for current version {current_version!r} — "
+                  f"using full pooled appendix instead", file=sys.stderr)
+            current_rows = rows
+        charts = render_chart_svgs(render_headline_table(current_rows))
         print("wrote " + ", ".join(str(c) for c in charts))
         return
 
