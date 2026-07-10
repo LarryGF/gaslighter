@@ -58,13 +58,13 @@ CHART_SPECS = [
      "subtitle": "headless Claude Code sessions, deterministic scoring &#183; lower is better",
      "field": "correct", "value": lambda v: (1 - v) * 100},
     {"key": "benchmark-completeness", "title": "Missed requirements (judged) per 100 tasks",
-     "subtitle": "LLM-judged completeness, 0-3 scale &#183; lower is better",
+     "subtitle": "LLM-judged completeness (0-3 scale) rescaled to missed points per 100 tasks &#183; lower is better",
      "field": "judge_completeness", "value": lambda v: (3 - v) / 3 * 100},
     {"key": "benchmark-turns", "title": "Turns per task (mean)",
      "subtitle": "mean turns per arm &#183; cost/overhead, not a quality signal",
      "field": "turns", "value": lambda v: v},
     {"key": "benchmark-overcorrection", "title": "Overcorrection per 100 tasks",
-     "subtitle": "LLM-judged overcorrection, 0-3 scale &#183; lower is better",
+     "subtitle": "LLM-judged overcorrection (0-3 scale) rescaled per 100 tasks &#183; lower is better",
      "field": "judge_overcorrection", "value": lambda v: (v / 3) * 100},
 ]
 
@@ -596,6 +596,7 @@ def render(run_dir, dry_run=False):
     sample_size = render_sample_size_note(pooled_rows)
     missing_metrics = render_missing_metrics_note(pooled_rows)
     version_history_body = render_version_history_table(pooled_rows)
+    current_run_meta = compute_run_meta(current_rows)
     headline_agg = render_headline_table(current_rows)
     n_tasks = len(set(r["task"] for r in current_rows))
     n_models = len(set(r["model"] for r in current_rows))
@@ -609,9 +610,9 @@ def render(run_dir, dry_run=False):
     nudge_sentence = mechanical_nudge_sentence(headline_agg)
     evals_readme_prose = leader_sentence + ((" " + nudge_sentence) if nudge_sentence else "")
 
-    readme_body = render_readme_intro_sentence(run_meta) + "\n\n" + _render_table(
+    readme_body = render_readme_intro_sentence(current_run_meta) + "\n\n" + _render_table(
         headline_agg, ["arm", "correct", "auto_complete", "judge_completeness", "judge_overcorrection"])
-    evals_readme_intro = render_evals_readme_intro(run_meta)
+    evals_readme_intro = render_evals_readme_intro(current_run_meta)
     evals_readme_body = _render_table(
         headline_agg, ["arm", "correct", "auto_complete", "judge_completeness", "judge_overcorrection", "turns", "cost"])
 
