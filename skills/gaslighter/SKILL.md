@@ -4,7 +4,7 @@ description: "Requirement completeness checker — nudges you to re-read the ori
 when_to_use: "Use when user says 'gaslighter', 'eval', 'evals', 'run evals', 'benchmark', 'judge', 'score', 'rate', or invokes /gaslighter directly."
 model: haiku
 allowed-tools:
-  - Bash(node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get)
+  - Bash(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get)
   - Skill(gaslighter:eval)
   - Skill(gaslighter:judge)
   - Skill(gaslighter:config)
@@ -17,7 +17,7 @@ A Stop hook that asks you to verify you haven't missed anything before completin
 
 ## Config Check
 
-Current persisted config: !`node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get`
+Current persisted config: !`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/hooks/gaslighter-config-cli.js" --get`
 
 ## Routing
 
