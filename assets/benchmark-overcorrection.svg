@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="276" viewBox="0 0 860 276" role="img" aria-label="Overcorrection per 100 tasks by arm; gaslighter-smart lowest at 3.3, gaslighter-full highest at 9.1.">
+<text x="170" y="22" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="15" font-weight="600" fill="#0b0b0b">Overcorrection per 100 tasks</text>
+<text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#52514e">LLM-judged overcorrection, 0-3 scale &#183; lower is better</text>
+<text x="158" y="79.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b">gaslighter-full</text>
+<path d="M170,66.0 H713.8260869565217 Q717.8260869565217,66.0 717.8260869565217,70.0 V80.0 Q717.8260869565217,84.0 713.8260869565217,84.0 H170 Z" fill="#2a78d6"/>
+<text x="725.8260869565217" y="79.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b">9.1</text>
+<text x="158" y="113.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">gaslighter-lite</text>
+<path d="M170,100.0 H682.9626454378443 Q686.9626454378443,100.0 686.9626454378443,104.0 V114.0 Q686.9626454378443,118.0 682.9626454378443,118.0 H170 Z" fill="#898781"/>
+<text x="694.9626454378443" y="113.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">8.6</text>
+<text x="158" y="147.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">nudge-prompt</text>
+<path d="M170,134.0 H610.7538388658447 Q614.7538388658447,134.0 614.7538388658447,138.0 V148.0 Q614.7538388658447,152.0 610.7538388658447,152.0 H170 Z" fill="#898781"/>
+<text x="622.7538388658447" y="147.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">7.4</text>
+<text x="158" y="181.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">gaslighter-off</text>
+<path d="M170,168.0 H544.5139054177403 Q548.5139054177403,168.0 548.5139054177403,172.0 V182.0 Q548.5139054177403,186.0 544.5139054177403,186.0 H170 Z" fill="#898781"/>
+<text x="556.5139054177403" y="181.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">6.3</text>
+<text x="158" y="215.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">baseline</text>
+<path d="M170,202.0 H520.9295774647887 Q524.9295774647887,202.0 524.9295774647887,206.0 V216.0 Q524.9295774647887,220.0 520.9295774647887,220.0 H170 Z" fill="#898781"/>
+<text x="532.9295774647887" y="215.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">5.9</text>
+<text x="158" y="249.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">gaslighter-smart</text>
+<path d="M170,236.0 H366.6123698714024 Q370.6123698714024,236.0 370.6123698714024,240.0 V250.0 Q370.6123698714024,254.0 366.6123698714024,254.0 H170 Z" fill="#898781"/>
+<text x="378.6123698714024" y="249.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">3.3</text>
+<line x1="170" y1="54" x2="170" y2="262" stroke="#c3c2b7" stroke-width="1"/>
+</svg>

@@ -8,8 +8,10 @@ three findings docs, appending new appendix rows without rewriting old ones.
   python render_findings.py --chart               # regenerate chart SVGs from the current appendix
 """
 import argparse
+import functools
 import json
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -23,12 +25,12 @@ EVALS_README = ROOT / "evals" / "README.md"
 
 APPENDIX_COLUMNS = ["task", "arm", "model", "run_stamp", "run", "correct",
                     "auto_complete", "judge_completeness", "judge_overcorrection",
-                    "turns", "cost", "missing", "cite"]
+                    "turns", "cost", "missing", "cite", "hook_sha"]
 
 ARM_ORDER = ["baseline", "gaslighter-off", "gaslighter-lite", "gaslighter-full", "nudge-prompt"]
 
 BLOCK_MARKERS = {
-    FINDINGS: ["INTRO", "SAMPLE_SIZE", "MISSING_METRICS", "HEADLINE_TABLE", "PERTASK_TABLE"],
+    FINDINGS: ["INTRO", "SAMPLE_SIZE", "MISSING_METRICS", "VERSION_HISTORY", "HEADLINE_TABLE", "PERTASK_TABLE"],
     README: ["RESULTS_TABLE", "RESULTS_PROSE"],
     EVALS_README: ["RESULTS_INTRO", "RESULTS_TABLE", "RESULTS_PROSE"],
 }
@@ -41,12 +43,72 @@ ASSETS = ROOT / "assets"
 # One accent for the featured arm, neutral gray for context bars. Identity is
 # carried by the direct arm labels, so the gray is de-emphasis, not a series color.
 CHART_THEMES = {
-    "benchmark.svg": {"accent": "#2a78d6", "neutral": "#898781",
-                      "ink": "#0b0b0b", "ink2": "#52514e", "axis": "#c3c2b7"},
-    "benchmark-dark.svg": {"accent": "#3987e5", "neutral": "#898781",
-                           "ink": "#ffffff", "ink2": "#c3c2b7", "axis": "#383835"},
+    "light": {"accent": "#2a78d6", "neutral": "#898781",
+              "ink": "#0b0b0b", "ink2": "#52514e", "axis": "#c3c2b7"},
+    "dark": {"accent": "#3987e5", "neutral": "#898781",
+             "ink": "#ffffff", "ink2": "#c3c2b7", "axis": "#383835"},
 }
 CHART_FEATURED_ARM = "gaslighter-full"
+
+# Each spec drives one metric's light+dark SVG pair. `field` reads a mean from
+# the already-aggregated headline row (aggregate() computes all of these);
+# `value` rescales it into the chart's plotted unit.
+CHART_SPECS = [
+    {"key": "benchmark", "title": "Missed requirements per 100 tasks",
+     "subtitle": "headless Claude Code sessions, deterministic scoring &#183; lower is better",
+     "field": "correct", "value": lambda v: (1 - v) * 100},
+    {"key": "benchmark-completeness", "title": "Missed requirements (judged) per 100 tasks",
+     "subtitle": "LLM-judged completeness, 0-3 scale &#183; lower is better",
+     "field": "judge_completeness", "value": lambda v: (3 - v) / 3 * 100},
+    {"key": "benchmark-turns", "title": "Turns per task (mean)",
+     "subtitle": "mean turns per arm &#183; cost/overhead, not a quality signal",
+     "field": "turns", "value": lambda v: v},
+    {"key": "benchmark-overcorrection", "title": "Overcorrection per 100 tasks",
+     "subtitle": "LLM-judged overcorrection, 0-3 scale &#183; lower is better",
+     "field": "judge_overcorrection", "value": lambda v: (v / 3) * 100},
+]
+
+
+def _git_sha():
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+                               text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
+def _version_tags_containing(sha):
+    try:
+        out = subprocess.run(["git", "tag", "--contains", sha], cwd=ROOT, capture_output=True,
+                              text=True, check=True).stdout
+    except Exception:
+        return []
+    return [t.strip() for t in out.splitlines() if t.strip()]
+
+
+def _semver_tuple(tag):
+    return tuple(int(p) for p in tag.lstrip("v").split("."))
+
+
+@functools.lru_cache(maxsize=None)
+def version_bucket(sha):
+    """Dynamically resolved at render time from current git tags — a sha never
+    changes, but its bucket moves from 'unreleased' to 'vX.Y.Z' the next time
+    this runs after that tag exists locally."""
+    if not sha or sha == "unknown":
+        return "pre-instrumentation"
+    tags = _version_tags_containing(sha)
+    if not tags:
+        return "unreleased"
+    return min(tags, key=_semver_tuple)
+
+
+def _version_sort_key(v):
+    if v == "pre-instrumentation":
+        return (0, ())
+    if v == "unreleased":
+        return (2, ())
+    return (1, _semver_tuple(v))
 
 
 class RenderError(Exception):
@@ -135,6 +197,7 @@ def join_run_rows(run_stamp, results_rows, judge_scores):
             "cost": _fmt_cost(cost) if cost is not None else "N/A",
             "missing": (js.get("missing") or "N/A") if js else "N/A",
             "cite": (js.get("cite") or "N/A") if js else "N/A",
+            "hook_sha": r.get("hook_sha") or "unknown",
         })
 
     for name in judge_by_key:
@@ -183,10 +246,11 @@ def aggregate(rows, group_keys):
 _HEADERS = {
     "task": "Task", "arm": "Arm", "n": "n", "correct": "Correct", "auto_complete": "Auto Complete",
     "judge_completeness": "Judge Completeness", "judge_overcorrection": "Judge Overcorrection",
-    "turns": "Turns", "cost": "Cost/run",
+    "turns": "Turns", "cost": "Cost/run", "hook_version": "Version",
 }
 _FORMATTERS = {
     "task": lambda r: r["task"], "arm": lambda r: r["arm"], "n": lambda r: str(r["n"]),
+    "hook_version": lambda r: r["hook_version"],
     "correct": lambda r: f"{r['correct']:.3f}" if r["correct"] is not None else "N/A",
     "auto_complete": lambda r: f"{r['auto_complete']:.3f}" if r["auto_complete"] is not None else "N/A",
     "judge_completeness": lambda r: f"{r['judge_completeness']:.2f}" if r["judge_completeness"] is not None else "N/A",
@@ -222,22 +286,24 @@ def compute_run_meta(pooled_rows):
     return meta
 
 
-def _chart_svg(bars, theme):
-    """Horizontal bar chart of failures per 100 tasks. bars = [(arm, value)] sorted desc."""
+def _chart_svg(bars, theme, title, subtitle):
+    """Horizontal bar chart. bars = [(arm, value)] sorted desc."""
     font = 'system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif'
     left, right, top, row_h, bar_h, bottom = 170, 60, 58, 34, 18, 14
     width = 860
     height = top + row_h * len(bars) + bottom
-    xmax = max(v for _, v in bars) * 1.15
+    xmax = max(v for _, v in bars) * 1.15 or 1
     plot_w = width - left - right
+    aria = (f"{title} by arm; {bars[-1][0]} lowest at {bars[-1][1]:.1f}, "
+            f"{bars[0][0]} highest at {bars[0][1]:.1f}.")
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="Missed requirements per 100 tasks by arm; {bars[-1][0]} is lowest at {bars[-1][1]:.1f}">',
+        f'aria-label="{aria}">',
         f'<text x="{left}" y="22" font-family="{font}" font-size="15" font-weight="600" '
-        f'fill="{theme["ink"]}">Missed requirements per 100 tasks</text>',
+        f'fill="{theme["ink"]}">{title}</text>',
         f'<text x="{left}" y="41" font-family="{font}" font-size="12.5" '
-        f'fill="{theme["ink2"]}">headless Claude Code sessions, deterministic scoring &#183; lower is better</text>',
+        f'fill="{theme["ink2"]}">{subtitle}</text>',
     ]
     for i, (arm, v) in enumerate(bars):
         y = top + i * row_h + (row_h - bar_h) / 2
@@ -260,20 +326,31 @@ def _chart_svg(bars, theme):
 
 
 def render_chart_svgs(headline_agg):
-    bars = sorted(((r["arm"], (1 - r["correct"]) * 100)
-                   for r in headline_agg if r["correct"] is not None),
-                  key=lambda t: -t[1])
-    if not bars:
-        raise RenderError("no correctness data to chart")
     ASSETS.mkdir(exist_ok=True)
-    for name, theme in CHART_THEMES.items():
-        (ASSETS / name).write_text(_chart_svg(bars, theme), encoding="utf-8")
-    return [ASSETS / name for name in CHART_THEMES]
+    written = []
+    for spec in CHART_SPECS:
+        bars = sorted(((r["arm"], spec["value"](r[spec["field"]]))
+                       for r in headline_agg if r.get(spec["field"]) is not None),
+                      key=lambda t: -t[1])
+        if not bars:
+            raise RenderError(f"no {spec['field']} data to chart for {spec['key']}")
+        for suffix, theme in ((".svg", CHART_THEMES["light"]), ("-dark.svg", CHART_THEMES["dark"])):
+            path = ASSETS / f"{spec['key']}{suffix}"
+            path.write_text(_chart_svg(bars, theme, spec["title"], spec["subtitle"]), encoding="utf-8")
+            written.append(path)
+    return written
 
 
 def render_headline_table(pooled_rows):
     agg = sorted(aggregate(pooled_rows, ["arm"]), key=lambda r: _arm_key(r["arm"]))
     return agg
+
+
+def render_version_history_table(pooled_rows):
+    agg = aggregate(pooled_rows, ["hook_version", "arm"])
+    agg.sort(key=lambda r: (_version_sort_key(r["hook_version"]), _arm_key(r["arm"])))
+    return _render_table(agg, ["hook_version", "arm", "n", "correct", "auto_complete",
+                                "judge_completeness", "judge_overcorrection", "turns", "cost"])
 
 
 def render_per_task_table(pooled_rows):
@@ -500,6 +577,13 @@ def render(run_dir, dry_run=False):
 
     pooled_prior = [r for r in prior_rows if r["run_stamp"] != stamp]
     pooled_rows = pooled_prior + new_rows
+    for r in pooled_rows:
+        r["hook_version"] = version_bucket(r["hook_sha"])
+    current_version = version_bucket(_git_sha())
+    current_rows = [r for r in pooled_rows if r["hook_version"] == current_version]
+    if not current_rows:
+        sys.exit(f"no cells found for current version {current_version!r} — "
+                  f"run an eval at this commit first")
 
     print_delta(pooled_prior, pooled_rows)
     if warnings:
@@ -511,14 +595,16 @@ def render(run_dir, dry_run=False):
     intro = render_intro(pooled_rows, run_meta)
     sample_size = render_sample_size_note(pooled_rows)
     missing_metrics = render_missing_metrics_note(pooled_rows)
-    headline_agg = render_headline_table(pooled_rows)
-    n_tasks = len(set(r["task"] for r in pooled_rows))
-    n_models = len(set(r["model"] for r in pooled_rows))
-    headline_desc = (f"Merged, n={headline_agg[0]['n']} per arm — {n_tasks} tasks, "
-                      f"{n_models} models, all {len(run_meta)} runs.")
+    version_history_body = render_version_history_table(pooled_rows)
+    headline_agg = render_headline_table(current_rows)
+    n_tasks = len(set(r["task"] for r in current_rows))
+    n_models = len(set(r["model"] for r in current_rows))
+    headline_desc = (f"Scoped to {current_version} (current), n={headline_agg[0]['n']} per arm — "
+                      f"{n_tasks} tasks, {n_models} models — see Version history below for trend "
+                      f"across releases.")
     headline_body = headline_desc + "\n\n" + _render_table(
         headline_agg, ["arm", "n", "correct", "auto_complete", "judge_completeness", "judge_overcorrection", "turns", "cost"])
-    per_task_body, _ = render_per_task_table(pooled_rows)
+    per_task_body, _ = render_per_task_table(current_rows)
     leader_sentence = mechanical_leader_sentence(headline_agg)
     nudge_sentence = mechanical_nudge_sentence(headline_agg)
     evals_readme_prose = leader_sentence + ((" " + nudge_sentence) if nudge_sentence else "")
@@ -532,7 +618,8 @@ def render(run_dir, dry_run=False):
     if dry_run:
         print("\n=== DRY RUN — computed content, nothing written ===")
         for name, body in (("INTRO", intro), ("SAMPLE_SIZE", sample_size),
-                            ("MISSING_METRICS", missing_metrics), ("HEADLINE_TABLE", headline_body),
+                            ("MISSING_METRICS", missing_metrics), ("VERSION_HISTORY", version_history_body),
+                            ("HEADLINE_TABLE", headline_body),
                             ("PERTASK_TABLE", per_task_body), ("README:RESULTS_PROSE", leader_sentence),
                             ("README:RESULTS_TABLE", readme_body),
                             ("EVALS_README:RESULTS_INTRO", evals_readme_intro),
@@ -546,6 +633,7 @@ def render(run_dir, dry_run=False):
         findings_text = patch_block(findings_text, "INTRO", intro)
         findings_text = patch_block(findings_text, "SAMPLE_SIZE", sample_size)
         findings_text = patch_block(findings_text, "MISSING_METRICS", missing_metrics)
+        findings_text = patch_block(findings_text, "VERSION_HISTORY", version_history_body)
         findings_text = patch_block(findings_text, "HEADLINE_TABLE", headline_body)
         findings_text = patch_block(findings_text, "PERTASK_TABLE", per_task_body)
         findings_text = append_before_marker(findings_text, "APPENDIX", format_appendix_rows(new_rows))

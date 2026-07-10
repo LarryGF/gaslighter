@@ -65,6 +65,14 @@ NO_RUN = (
 CODE_EXT = {".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".go", ".rs", ".java", ".rb", ".sh"}
 
 
+def _git_sha():
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+                               text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
 def _plugin_dir():
     env = os.environ.get("GASLIGHTER_PLUGIN_DIR")
     if env:
@@ -265,6 +273,8 @@ def score_workspace(task_id, arm, model, workdir):
     nudge_count, _ = _check_hook_fired(arm, session_id)
     meta["hook_fired"] = nudge_count > 0
     meta["nudge_count"] = nudge_count
+    sha_file = workdir / "_hook_sha.txt"
+    meta["hook_sha"] = sha_file.read_text(encoding="utf-8").strip() if sha_file.exists() else "unknown"
     if arm in ("gaslighter-lite", "gaslighter-full") and nudge_count == 0:
         print(f"  !! HOOK DID NOT FIRE: {task_id}/{arm}/{model} session={session_id}", flush=True)
     stats = code_stats(workdir)
@@ -319,6 +329,10 @@ def run_cell(task_id, arm, model, workdir, timeout=CELL_TIMEOUT):
                 se.write(f"\n[KILLED after {timeout}s timeout]".encode())
     except Exception as e:
         out_path.write_text(json.dumps({"error": str(e)[:300]}), encoding="utf-8")
+
+    # Sidecar file (not _claude.json, which is the CLI's own output) so hook_sha
+    # survives --rescore, which rebuilds results.json from workspace dirs alone.
+    (workdir / "_hook_sha.txt").write_text(_git_sha() or "unknown", encoding="utf-8")
 
     # lkb: flush OS write buffers before scoring — 4 parallel workers + heavy I/O
     # caused stale reads where scorer saw seed files instead of CLI-written output
