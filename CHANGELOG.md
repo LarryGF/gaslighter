@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/LarryGF/gaslighter/compare/v1.6.0...v1.7.0) (2026-07-23)
+
+
+### Features
+
+* **omp:** add omp extension adapter for the shared nudge engine ([04d2d00](https://github.com/LarryGF/gaslighter/commit/04d2d0096d1329fb5de3c4926d3ae992e8f8214c))
+
+
+### Miscellaneous
+
+* **evals:** refresh benchmark results from latest eval runs ([4ed4a2c](https://github.com/LarryGF/gaslighter/commit/4ed4a2c6d809be3542ca7ed660ef1e795b92b690))
+
 ## [1.6.0](https://github.com/LarryGF/gaslighter/compare/v1.5.0...v1.6.0) (2026-07-10)
 
 
