@@ -1,15 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="210" viewBox="0 0 860 210" role="img" aria-label="Turns per task (mean) by arm; baseline lowest at 6.1, gaslighter-full highest at 10.0.">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="210" viewBox="0 0 860 210" role="img" aria-label="Turns per task (mean) by arm; baseline lowest at 6.2, gaslighter-full highest at 9.9.">
 <text x="170" y="22" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="15" font-weight="600" fill="#ffffff">Turns per task (mean)</text>
 <text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#c3c2b7">mean turns per arm &#183; cost/overhead, not a quality signal</text>
-<text x="170" y="59" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="11.5" fill="#c3c2b7">gaslighter latest (unreleased, since v1.5.0) &#183; n=37/arm &#183; 8 tasks &#215; 2 models &#215; 2 runs &#8212; directional, not statistically significant</text>
+<text x="170" y="59" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="11.5" fill="#c3c2b7">gaslighter v1.6.0 &#183; n=101/arm &#183; 8 tasks &#215; 2 models &#215; 4 runs &#8212; directional, not statistically significant</text>
 <text x="158" y="95.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">gaslighter-full</text>
 <path d="M170,82.0 H713.8260869565217 Q717.8260869565217,82.0 717.8260869565217,86.0 V96.0 Q717.8260869565217,100.0 713.8260869565217,100.0 H170 Z" fill="#3987e5"/>
-<text x="725.8260869565217" y="95.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">10.0</text>
+<text x="725.8260869565217" y="95.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">9.9</text>
 <text x="158" y="129.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">gaslighter-lite</text>
-<path d="M170,116.0 H553.4867444326617 Q557.4867444326617,116.0 557.4867444326617,120.0 V130.0 Q557.4867444326617,134.0 553.4867444326617,134.0 H170 Z" fill="#898781"/>
-<text x="565.4867444326617" y="129.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">7.1</text>
+<path d="M170,116.0 H559.1844888366628 Q563.1844888366628,116.0 563.1844888366628,120.0 V130.0 Q563.1844888366628,134.0 559.1844888366628,134.0 H170 Z" fill="#898781"/>
+<text x="571.1844888366628" y="129.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">7.1</text>
 <text x="158" y="163.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#c3c2b7">baseline</text>
-<path d="M170,150.0 H498.5556733828208 Q502.5556733828208,150.0 502.5556733828208,154.0 V164.0 Q502.5556733828208,168.0 498.5556733828208,168.0 H170 Z" fill="#898781"/>
-<text x="510.5556733828208" y="163.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">6.1</text>
+<path d="M170,150.0 H510.3791617704662 Q514.3791617704662,150.0 514.3791617704662,154.0 V164.0 Q514.3791617704662,168.0 510.3791617704662,168.0 H170 Z" fill="#898781"/>
+<text x="522.3791617704662" y="163.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#ffffff">6.2</text>
 <line x1="170" y1="70" x2="170" y2="176" stroke="#383835" stroke-width="1"/>
 </svg>

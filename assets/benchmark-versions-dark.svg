@@ -1,32 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="424" viewBox="0 0 860 424" role="img" aria-label="gaslighter-full across 2 version cohorts on 4 aspects; latest cohort highlighted.">
 <text x="170" y="22" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="15" font-weight="600" fill="#ffffff">gaslighter-full across versions</text>
-<text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#c3c2b7">cohorts by release range &#183; latest = commits since v1.5.0 &#183; lower is better (turns is cost, not quality)</text>
+<text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#c3c2b7">cohorts by release range &#183; latest = commits since v1.6.0 &#183; lower is better (turns is cost, not quality)</text>
 <text x="170" y="72" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Missed requirements per 100 tasks</text>
 <text x="158" y="96.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">pre-instr.</text>
 <path d="M170,84.5 H178.11538461538464 Q182.11538461538464,84.5 182.11538461538464,88.5 V95.5 Q182.11538461538464,99.5 178.11538461538464,99.5 H170 Z" fill="#898781"/>
 <text x="190.11538461538464" y="96.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">1.9</text>
-<text x="158" y="120.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">latest</text>
-<path d="M170,108.5 H183.027027027027 Q187.027027027027,108.5 187.027027027027,112.5 V119.5 Q187.027027027027,123.5 183.027027027027,123.5 H170 Z" fill="#3987e5"/>
-<text x="195.027027027027" y="120.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">2.7</text>
+<text x="158" y="120.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">v1.6.0</text>
+<path d="M170,108.5 H173.11881188118812 Q176.23762376237624,108.5 176.23762376237624,111.61881188118812 V120.38118811881188 Q176.23762376237624,123.5 173.11881188118812,123.5 H170 Z" fill="#898781"/>
+<text x="184.23762376237624" y="120.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">1.0</text>
 <text x="170" y="160" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Missed requirements (judged) per 100 tasks</text>
 <text x="158" y="184.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">pre-instr.</text>
 <path d="M170,172.5 H230.61538461538456 Q234.61538461538456,172.5 234.61538461538456,176.5 V183.5 Q234.61538461538456,187.5 230.61538461538456,187.5 H170 Z" fill="#898781"/>
 <text x="242.61538461538456" y="184.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">10.3</text>
-<text x="158" y="208.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">latest</text>
-<path d="M170,196.5 H256.81081081081084 Q260.81081081081084,196.5 260.81081081081084,200.5 V207.5 Q260.81081081081084,211.5 256.81081081081084,211.5 H170 Z" fill="#3987e5"/>
-<text x="268.81081081081084" y="208.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">14.4</text>
+<text x="158" y="208.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">v1.6.0</text>
+<path d="M170,196.5 H226.29702970297026 Q230.29702970297026,196.5 230.29702970297026,200.5 V207.5 Q230.29702970297026,211.5 226.29702970297026,211.5 H170 Z" fill="#898781"/>
+<text x="238.29702970297026" y="208.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">9.6</text>
 <text x="170" y="248" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Turns per task (mean)</text>
 <text x="158" y="272.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">pre-instr.</text>
 <path d="M170,260.5 H713.8260869565217 Q717.8260869565217,260.5 717.8260869565217,264.5 V271.5 Q717.8260869565217,275.5 713.8260869565217,275.5 H170 Z" fill="#898781"/>
 <text x="725.8260869565217" y="272.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">10.9</text>
-<text x="158" y="296.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">latest</text>
-<path d="M170,284.5 H666.3803080758214 Q670.3803080758214,284.5 670.3803080758214,288.5 V295.5 Q670.3803080758214,299.5 666.3803080758214,299.5 H170 Z" fill="#3987e5"/>
-<text x="678.3803080758214" y="296.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">10.0</text>
+<text x="158" y="296.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">v1.6.0</text>
+<path d="M170,284.5 H662.2718969493837 Q666.2718969493837,284.5 666.2718969493837,288.5 V295.5 Q666.2718969493837,299.5 662.2718969493837,299.5 H170 Z" fill="#898781"/>
+<text x="674.2718969493837" y="296.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">9.9</text>
 <text x="170" y="336" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#ffffff">Overcorrection per 100 tasks</text>
 <text x="158" y="360.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">pre-instr.</text>
 <path d="M170,348.5 H223.34615384615384 Q227.34615384615384,348.5 227.34615384615384,352.5 V359.5 Q227.34615384615384,363.5 223.34615384615384,363.5 H170 Z" fill="#898781"/>
 <text x="235.34615384615384" y="360.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">9.1</text>
-<text x="158" y="384.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">latest</text>
-<path d="M170,372.5 H239.7837837837838 Q243.7837837837838,372.5 243.7837837837838,376.5 V383.5 Q243.7837837837838,387.5 239.7837837837838,387.5 H170 Z" fill="#3987e5"/>
-<text x="251.7837837837838" y="384.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" font-weight="600" fill="#ffffff">11.7</text>
+<text x="158" y="384.0" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#c3c2b7">v1.6.0</text>
+<path d="M170,372.5 H247.08910891089107 Q251.08910891089107,372.5 251.08910891089107,376.5 V383.5 Q251.08910891089107,387.5 247.08910891089107,387.5 H170 Z" fill="#898781"/>
+<text x="259.08910891089107" y="384.0" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12" fill="#ffffff">12.9</text>
 </svg>

@@ -1,16 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="210" viewBox="0 0 860 210" role="img" aria-label="Overcorrection per 100 tasks by arm; baseline lowest at 6.3, gaslighter-full highest at 11.7.">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="210" viewBox="0 0 860 210" role="img" aria-label="Overcorrection per 100 tasks by arm; baseline lowest at 6.6, gaslighter-full highest at 12.9.">
 <text x="170" y="22" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="15" font-weight="600" fill="#0b0b0b">Overcorrection per 100 tasks</text>
 <text x="170" y="41" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="12.5" fill="#52514e">judged overcorrection, from 0&#8211;3 scores &#183; axis 0&#8211;100 (3&#8594;100), lower is better</text>
-<text x="170" y="59" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="11.5" fill="#52514e">gaslighter latest (unreleased, since v1.5.0) &#183; n=37/arm &#183; 8 tasks &#215; 2 models &#215; 2 runs &#8212; directional, not statistically significant</text>
+<text x="170" y="59" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="11.5" fill="#52514e">gaslighter v1.6.0 &#183; n=101/arm &#183; 8 tasks &#215; 2 models &#215; 4 runs &#8212; directional, not statistically significant</text>
 <text x="158" y="95.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b">gaslighter-full</text>
-<path d="M170,82.0 H239.7837837837838 Q243.7837837837838,82.0 243.7837837837838,86.0 V96.0 Q243.7837837837838,100.0 239.7837837837838,100.0 H170 Z" fill="#2a78d6"/>
-<text x="251.7837837837838" y="95.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b">11.7</text>
+<path d="M170,82.0 H247.08910891089107 Q251.08910891089107,82.0 251.08910891089107,86.0 V96.0 Q251.08910891089107,100.0 247.08910891089107,100.0 H170 Z" fill="#2a78d6"/>
+<text x="259.08910891089107" y="95.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b">12.9</text>
 <text x="158" y="129.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">gaslighter-lite</text>
-<path d="M170,116.0 H211.40540540540542 Q215.40540540540542,116.0 215.40540540540542,120.0 V130.0 Q215.40540540540542,134.0 211.40540540540542,134.0 H170 Z" fill="#898781"/>
-<text x="223.40540540540542" y="129.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">7.2</text>
+<path d="M170,116.0 H220.05940594059405 Q224.05940594059405,116.0 224.05940594059405,120.0 V130.0 Q224.05940594059405,134.0 220.05940594059405,134.0 H170 Z" fill="#898781"/>
+<text x="232.05940594059405" y="129.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">8.6</text>
 <text x="158" y="163.5" text-anchor="end" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#52514e">baseline</text>
-<path d="M170,150.0 H205.72972972972974 Q209.72972972972974,150.0 209.72972972972974,154.0 V164.0 Q209.72972972972974,168.0 205.72972972972974,168.0 H170 Z" fill="#898781"/>
-<text x="217.72972972972974" y="163.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">6.3</text>
+<path d="M170,150.0 H207.58415841584159 Q211.58415841584159,150.0 211.58415841584159,154.0 V164.0 Q211.58415841584159,168.0 207.58415841584159,168.0 H170 Z" fill="#898781"/>
+<text x="219.58415841584159" y="163.5" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="13" fill="#0b0b0b">6.6</text>
 <line x1="170" y1="70" x2="170" y2="176" stroke="#c3c2b7" stroke-width="1"/>
 <line x1="485.0" y1="70" x2="485.0" y2="176" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="2 3"/>
 <text x="485.0" y="191" text-anchor="middle" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="11" fill="#52514e">50</text>
