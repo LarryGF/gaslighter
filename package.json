@@ -1,0 +1,9 @@
+{
+  "name": "gaslighter",
+  "version": "1.6.0",
+  "private": true,
+  "description": "Requirement completeness checker — nudges you to re-read the original request before finishing code changes.",
+  "omp": {
+    "extensions": ["./omp/gaslighter-extension.ts"]
+  }
+}

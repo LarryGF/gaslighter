@@ -6,5 +6,6 @@
     "name": "LarryGF",
     "url": "https://github.com/LarryGF"
   },
-  "hooks": "./hooks/gaslighter-hooks.json"
+  "hooks": "./hooks/gaslighter-hooks.json",
+  "skills": "./skills"
 }

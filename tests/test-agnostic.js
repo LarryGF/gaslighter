@@ -24,6 +24,7 @@ var env = require('../hooks/lib/env');
 var core = require('../hooks/lib/core');
 var createStore = require('../hooks/lib/store').createStore;
 var oc = require('../hooks/lib/opencode');
+var ompLib = require('../hooks/lib/omp');
 
 // --- env resolution ---
 
@@ -141,6 +142,89 @@ test('opencode.parseModelId: splits provider/model, null otherwise', function ()
   assert.deepStrictEqual(oc.parseModelId('anthropic/claude-haiku-4-5'), { providerID: 'anthropic', modelID: 'claude-haiku-4-5' });
   assert.strictEqual(oc.parseModelId('claude-haiku'), null);
   assert.strictEqual(oc.parseModelId(''), null);
+});
+
+// --- omp parsing helpers ---
+
+test('omp.extractTurn: aggregates assistant turn, detects edit tools', function () {
+  var msgs = [
+    { role: 'user', content: [{ type: 'text', text: 'do the thing' }] },
+    { role: 'assistant', content: [
+      { type: 'text', text: 'working' },
+      { type: 'tool_use', name: 'edit' }
+    ] }
+  ];
+  var t = ompLib.extractTurn(msgs);
+  assert.strictEqual(t.text, 'working');
+  assert.strictEqual(t.usedTools, true);
+  assert.strictEqual(t.editedFiles, true);
+  assert.strictEqual(t.uuid, '1');
+  assert.strictEqual(t.complete, true);
+});
+
+test('omp.extractTurn: read-only turn (no edit tools)', function () {
+  var msgs = [
+    { role: 'user', content: [{ type: 'text', text: 'explain' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'here' }] }
+  ];
+  var t = ompLib.extractTurn(msgs);
+  assert.strictEqual(t.usedTools, false);
+  assert.strictEqual(t.editedFiles, false);
+});
+
+test('omp.extractTurn: staleIndex stops the walk (no leak across cycles)', function () {
+  var msgs = [
+    { role: 'user', content: [{ type: 'text', text: 'req' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'write' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'done, nothing changed' }] }
+  ];
+  var t = ompLib.extractTurn(msgs, ompLib.parseStaleIndex('1'));
+  assert.strictEqual(t.uuid, '2');
+  assert.strictEqual(t.usedTools, false, 'prior turn tool use must not leak forward');
+});
+
+test('omp.extractTurn: tool result messages are not a turn boundary', function () {
+  var msgs = [
+    { role: 'user', content: [{ type: 'text', text: 'req' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'read' }] },
+    { role: 'toolResult', content: [{ type: 'text', text: 'file contents' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'done' }] }
+  ];
+  var t = ompLib.extractTurn(msgs);
+  assert.strictEqual(t.text, 'done');
+  assert.strictEqual(t.usedTools, true);
+});
+
+test('omp.extractTurn: null when no assistant message', function () {
+  assert.strictEqual(ompLib.extractTurn([{ role: 'user', content: [] }]), null);
+  assert.strictEqual(ompLib.extractTurn([]), null);
+});
+
+test('omp.firstUserText: returns first user message text', function () {
+  var msgs = [
+    { role: 'user', content: [{ type: 'text', text: 'the original ask' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    { role: 'user', content: [{ type: 'text', text: 'later nudge' }] }
+  ];
+  assert.strictEqual(ompLib.firstUserText(msgs), 'the original ask');
+});
+
+test('omp.parseStaleIndex: parses numeric strings, null otherwise', function () {
+  assert.strictEqual(ompLib.parseStaleIndex('3'), 3);
+  assert.strictEqual(ompLib.parseStaleIndex(null), null);
+  assert.strictEqual(ompLib.parseStaleIndex('nope'), null);
+});
+
+test('omp.parseSmartStreamOutput: extracts assistant text from turn_end event', function () {
+  var stream = [
+    '{"type":"agent_start"}',
+    '{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"{\\"ok\\":true}"}]}}'
+  ].join('\n');
+  assert.strictEqual(ompLib.parseSmartStreamOutput(stream), '{"ok":true}');
+});
+
+test('omp.parseSmartStreamOutput: throws when no assistant turn found', function () {
+  assert.throws(function () { ompLib.parseSmartStreamOutput('{"type":"agent_start"}'); });
 });
 
 // --- shared core.decide ---
